@@ -1,0 +1,41 @@
+{
+  "apiBaseUrl": "http://192.168.0.51:8080",
+  "requestTimeoutMs": 8000,
+  "auth": {
+    "loginPath": "/auth/login",
+    "logoutPath": "/auth/logout",
+    "signupPath": "/auth/signup"
+  },
+  "event": {
+    "wsUrl": "ws://192.168.0.51:8080/events/ws",
+    "wsSubprotocol": "vms.events.v1",
+    "eventsPath": "/events",
+    "detailPath": "/event/{eventId}"
+  },
+  "device": {
+    "devicesPath": "/devices",
+    "deviceChannelsPath": "/device/{deviceId}/channels",
+    "channelDetailPath": "/channel/{channelId}"
+  },
+  "cctv": {
+    "zoomPath": "/channel/{channelId}/zoom",
+    "focusPath": "/channel/{channelId}/focus"
+  },
+  "playback": {
+    "channelsByDatePathTemplate": "/playback/dates/{date}/channels",
+    "timelinePath": "/playback/timeline",
+    "streamPath": "/playback/stream",
+    "exportPath": "/playback/export",
+    "exportStatusPathTemplate": "/playback/export/{jobId}"
+  },
+  "ugv": {
+    "gatewayWsUrl": "ws://192.168.0.51:8080/gw/ws",
+    "gatewayWsSubprotocol": "vms.gw.v1",
+    "mapBounds": {
+      "minLat": 33.0,
+      "maxLat": 39.0,
+      "minLon": 124.0,
+      "maxLon": 132.0
+    }
+  }
+}

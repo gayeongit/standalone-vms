@@ -1,0 +1,80 @@
+기능,송신 주체,요청 Payload,수신 주체,응답 Payload,비고
+이벤트 구독 요청,VMS-Client,"{
+    ""type"": ""subscribe"",
+    ""reqId"": ""sub-001"",
+    ""filters"": {
+        ""deviceIds"": [
+            11,
+            12
+        ],
+        ""eventTypes"": [
+            ""MOTION""
+        ]
+    },
+    ""resumeFrom"": {
+        ""lastEventId"": 12345
+    }
+}",VMS-Server,"{
+    ""type"": ""subscribed"",
+    ""reqId"": ""sub-001"",
+    ""subscriptionId"": ""s-9f3c"",
+    ""effectiveFilters"": {
+        ""deviceIds"": [
+            11,
+            12
+        ],
+        ""eventTypes"": [
+            ""MOTION""
+        ]
+    }
+}","구독 등록. 서버는 deviceIds 권한검사(IDOR 방지) 후 effectiveFilters로 확정/부분거절 가능
+
+재연결 시 lastEventId 기반 resume 권장
+
+네트워크 단절 대비. 서버는 resumeFrom 기준으로 replay 가능 범위 정책 필요(예: 1시간/1만건)"
+이벤트 발행,VMS-Server,"{
+    ""type"": ""event"",
+    ""subscriptionId"": ""s-9f3c"",
+    ""eventId"": 103,
+    ""deviceId"": 11,
+    ""channelId"": 101,
+    ""eventType"": ""MOTION"",
+    ""eventDetaile"": null
+    ""eventTime"": ""..."",
+    ""cursor"": 12890
+}",VMS-Client,,이벤트 푸시. cursor/lastEventId로 누락 복구 가능하도록 포함 권장
+GPS 실시간 발행,VMS-Server,"{
+    ""type"": ""event.gps"",
+    ""subscriptionId"": ""s-9f3c"",
+    ""deviceId"": 11,
+    ""channelId"": 101,
+    ""payload"": {
+        ""lat"": 37.123456,
+        ""lon"": 127.123456,
+        ""alt"": 52.3,
+        ""headingDeg"": 183.2,
+        ""speedMps"": 1.7,
+        ""hdop"": 0.9
+    }
+}",VMS-Client,,
+통신 품질 발행,VMS-Server,"{
+    ""type"": ""event.rssi"",
+    ""subscriptionId"": ""s-9f3c"",
+    ""deviceId"": 11,
+    ""channelId"": 101,
+    ""payload"": {
+        ""rssiDbm"": -71,
+        ""snrDb"": 12.5,
+        ""linkType"": ""rf""
+    }
+}",VMS-Client,,
+세션 유지 핑퐁,VMS-Client,"{""type"":""ping"",""ts"":""...""}",VMS-Server,"{""type"":""pong"",""ts"":""...""}",Keepalive. 또는 WS 프로토콜 ping/pong 프레임을 라이브러리 기본값으로 사용
+구독 해제,VMS-Client,"{
+    ""type"": ""unsubscribed"",
+    ""reqId"": ""unsub-001"",
+    ""subscriptionId"": ""s-9f3c""
+}",VMS-Server,"{
+    ""type"": ""unsubscribed"",
+    ""reqId"": ""unsub-001"",
+    ""subscriptionId"": ""s-9f3c""
+}",

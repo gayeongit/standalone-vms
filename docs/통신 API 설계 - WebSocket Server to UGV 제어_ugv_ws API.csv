@@ -1,0 +1,134 @@
+기능,송신 주체,요청 Payload,수신 주체,응답 Payload,비고
+세션 유지 핑퐁,Gateway,"{""type"":""ping"",""ts"":""...""}",VMS-Server,"{""type"":""pong"",""ts"":""...""}",Keepalive. 또는 WS 프로토콜 ping/pong 프레임을 라이브러리 기본값으로 사용
+UGV 연결 요청,VMS-Server,"{
+    ""type"": ""request.conn.ugv"",
+    ""msgId"": ""..."",
+    ""ts"": ""..."",
+    ""from"": {
+        ""gatewayId"": ""G-01"",
+        ""ugvId"": ""U-11""
+    },
+    ""payload"": null
+}",Gateway,"{
+    ""type"": ""request.conn.ugv.ack"",
+    ""msgId"": ""..."",
+    ""ts"": ""..."",
+    ""from"": {
+        ""gatewayId"": ""G-01"",
+        ""ugvId"": ""U-11""
+    },
+    ""payload"": null
+}",
+UGV 연결 해제,VMS-Server,"{
+    ""type"": ""request.disconn.ugv"",
+    ""msgId"": ""..."",
+    ""ts"": ""..."",
+    ""from"": {
+        ""gatewayId"": ""G-01"",
+        ""ugvId"": ""U-11""
+    },
+    ""payload"": null
+}",Gateway,"{
+    ""type"": ""request.disconn.ugv.ack"",
+    ""msgId"": ""..."",
+    ""ts"": ""..."",
+    ""from"": {
+        ""gatewayId"": ""G-01"",
+        ""ugvId"": ""U-11""
+    },
+    ""payload"": null
+}",
+GPS 실시간 발행,Gateway,"{
+    ""type"": ""telemetry.gps"",
+    ""msgId"": ""..."",
+    ""ts"": ""..."",
+    ""from"": {
+        ""gatewayId"": ""G-01"",
+        ""ugvId"": ""U-11""
+    },
+    ""payload"": {
+        ""lat"": 37.123456,
+        ""lon"": 127.123456,
+        ""alt"": 52.3,
+        ""headingDeg"": 183.2,
+        ""speedMps"": 1.7,
+        ""hdop"": 0.9
+    }
+}",VMS-Server,"{
+    ""type"": ""telemetry.gps.ack"",
+    ""msgId"": ""..."",
+    ""ts"": ""..."",
+    ""from"": {
+        ""gatewayId"": ""G-01"",
+        ""ugvId"": ""U-11""
+    }
+}",
+통신 품질 발행,Gateway,"{
+    ""type"": ""telemetry.rssi"",
+    ""msgId"": ""..."",
+    ""ts"": ""..."",
+    ""from"": {
+        ""gatewayId"": ""G-01"",
+        ""ugvId"": ""U-11""
+    },
+    ""payload"": {
+        ""rssiDbm"": -71,
+        ""snrDb"": 12.5,
+        ""linkType"": ""rf""
+    }
+}",VMS-Server,"{
+    ""type"": ""telemetry.rssi.ack"",
+    ""msgId"": ""..."",
+    ""ts"": ""..."",
+    ""from"": {
+        ""gatewayId"": ""G-01"",
+        ""ugvId"": ""U-11""
+    }
+}",
+팬틸트줌 제어,VMS-Server,"{
+    ""type"": ""cmd.ptz"",
+    ""msgId"": ""..."",
+    ""ts"": ""..."",
+    ""to"": {
+        ""gatewayId"": ""G-01"",
+        ""ugvId"": ""U-11""
+    },
+    ""payload"": {
+        ""pan"": 0.2,
+        ""tilt"": -0.1,
+        ""zoom"": 0,
+        ""timeout"":100
+    }
+}",Gateway,"{
+    ""type"": ""cmd.ptz.ack"",
+    ""msgId"": ""..."",
+    ""ts"": ""..."",
+    ""to"": {
+        ""gatewayId"": ""G-01"",
+        ""ugvId"": ""U-11""
+    }
+}",
+주행 제어,VMS-Server,"{
+    ""type"": ""cmd.drive"",
+    ""msgId"": ""..."",
+    ""ts"": ""..."",
+    ""to"": {
+        ""gatewayId"": ""G-01"",
+        ""ugvId"": ""U-11""
+    },
+    ""payload"": {
+        ""forw"": 10,
+        ""back"": 10,
+        ""left"": 10,
+        ""right"": 10,
+        ""timeout"": 100
+    }
+}",Gateway,"{
+    ""type"": ""cmd.drive.ack"",
+    ""msgId"": ""..."",
+    ""ts"": ""..."",
+    ""to"": {
+        ""gatewayId"": ""G-01"",
+        ""ugvId"": ""U-11""
+    }
+}",

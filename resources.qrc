@@ -1,0 +1,13 @@
+<RCC>
+    <qresource prefix="/">
+        <file>styles/clue_logo.png</file>
+        <file>styles/checkbox_checked.svg</file>
+        <file>styles/refresh.svg</file>
+        <file>styles/spinner_refresh.svg</file>
+        <file>styles/topbar_notify.svg</file>
+        <file>styles/topbar_settings.svg</file>
+        <file>styles/topbar_logout.svg</file>
+        <file>styles/search.svg</file>
+        <file>styles/clue_logomark.svg</file>
+    </qresource>
+</RCC>

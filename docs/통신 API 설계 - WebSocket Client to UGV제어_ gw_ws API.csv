@@ -1,0 +1,134 @@
+기능,송신 주체,요청 Payload,수신 주체,응답 Payload,비고
+UGV 연결 요청,VMS-Client,"{
+    ""type"": ""request.conn.ugv"",
+    ""msgId"": ""..."",
+    ""ts"": ""..."",
+    ""from"": {
+        ""gatewayId"": ""G-01"",
+        ""ugvId"": ""U-11""
+    },
+    ""payload"": null
+}",VMS-Server,"{
+    ""type"": ""request.conn.ugv.ack"",
+    ""msgId"": ""..."",
+    ""ts"": ""..."",
+    ""from"": {
+        ""gatewayId"": ""G-01"",
+        ""ugvId"": ""U-11""
+    },
+    ""payload"": null
+}","여기서 gatewayId 는 devices 테이블의 type이 UGV로 되어 있는 장치의 id 이고
+ugvId 는  channels 테이블에서 devices 테이블의 type이 UGV 인 deviceid를 FK로 소유하는 channel_id 이다."
+UGV 연결 해제,VMS-Client,"{
+    ""type"": ""request.disconn.ugv"",
+    ""msgId"": ""..."",
+    ""ts"": ""..."",
+    ""from"": {
+        ""gatewayId"": ""G-01"",
+        ""ugvId"": ""U-11""
+    },
+    ""payload"": null
+}",VMS-Server,"{
+    ""type"": ""request.disconn.ugv.ack"",
+    ""msgId"": ""..."",
+    ""ts"": ""..."",
+    ""from"": {
+        ""gatewayId"": ""G-01"",
+        ""ugvId"": ""U-11""
+    },
+    ""payload"": null
+}",
+GPS 실시간 발행,VMS-Server,"{
+    ""type"": ""telemetry.gps"",
+    ""msgId"": ""..."",
+    ""ts"": ""..."",
+    ""from"": {
+        ""gatewayId"": ""G-01"",
+        ""ugvId"": ""U-11""
+    },
+    ""payload"": {
+        ""lat"": 37.123456,
+        ""lon"": 127.123456,
+        ""alt"": 52.3,
+        ""headingDeg"": 183.2,
+        ""speedMps"": 1.7,
+        ""hdop"": 0.9
+    }
+}",VMS-Client,"{
+    ""type"": ""telemetry.gps,ack"",
+    ""msgId"": ""..."",
+    ""ts"": ""..."",
+    ""from"": {
+        ""gatewayId"": ""G-01"",
+        ""ugvId"": ""U-11""
+    }
+}",
+통신 품질 발행,VMS-Server,"{
+    ""type"": ""telemetry.rssi"",
+    ""msgId"": ""..."",
+    ""ts"": ""..."",
+    ""from"": {
+        ""gatewayId"": ""G-01"",
+        ""ugvId"": ""U-11""
+    },
+    ""payload"": {
+        ""rssiDbm"": -71,
+        ""snrDb"": 12.5,
+        ""linkType"": ""rf""
+    }
+}",VMS-Client,"{
+    ""type"": ""telemetry.rssi.ack"",
+    ""msgId"": ""..."",
+    ""ts"": ""..."",
+    ""from"": {
+        ""gatewayId"": ""G-01"",
+        ""ugvId"": ""U-11""
+    }
+}",
+팬틸트줌 제어,VMS-Client,"{
+    ""type"": ""cmd.ptz"",
+    ""msgId"": ""..."",
+    ""ts"": ""..."",
+    ""to"": {
+        ""gatewayId"": ""G-01"",
+        ""ugvId"": ""U-11""
+    },
+    ""payload"": {
+        ""pan"": 0.2,
+        ""tilt"": -0.1,
+        ""zoom"": 0,
+        ""timeout"":100
+    }
+}",VMS-Server,"{
+    ""type"": ""cmd.ptz.ack"",
+    ""msgId"": ""..."",
+    ""ts"": ""..."",
+    ""to"": {
+        ""gatewayId"": ""G-01"",
+        ""ugvId"": ""U-11""
+    }
+}",
+주행 제어,VMS-Client,"{
+    ""type"": ""cmd.drive"",
+    ""msgId"": ""..."",
+    ""ts"": ""..."",
+    ""to"": {
+        ""gatewayId"": ""G-01"",
+        ""ugvId"": ""U-11""
+    },
+    ""payload"": {
+        ""forw"": 10,
+        ""back"": 10,
+        ""left"": 10,
+        ""right"": 10,
+        ""timeout"": 100
+    }
+}",VMS-Server,"{
+    ""type"": ""cmd.drive.ack"",
+    ""msgId"": ""..."",
+    ""ts"": ""..."",
+    ""to"": {
+        ""gatewayId"": ""G-01"",
+        ""ugvId"": ""U-11""
+    }
+}",

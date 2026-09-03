@@ -1,0 +1,2589 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+  <meta charset="UTF-8">
+  <title>VMS 프로토타입 v9 (화면캡처 클립 + 내보내기 + 배속)</title>
+  <style>
+    :root {
+      --accent: #F37321;
+      --bg: #1C1C1E;
+      --sidebar: #2C2C2E;
+      --control: #3A3A3C;
+      --text: #FFFFFF;
+      --text-sec: #8E8E93;
+      --text-light: #D1D1D6;
+      --green: #34C759;
+      --yellow: #FFCC00;
+      --red: #FF3B30;
+      --video: #000;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif;
+      font-size: 13px;
+      overflow: hidden;
+    }
+
+    /* ── SCREENS ── */
+    .screen {
+      display: none;
+      width: 100vw;
+      height: 100vh;
+    }
+
+    .screen.active {
+      display: flex;
+    }
+
+    /* ════════════ ① 로그인 ════════════ */
+    #s-login {
+      align-items: center;
+      justify-content: center;
+    }
+
+    .login-box {
+      background: var(--sidebar);
+      border: 2px solid var(--control);
+      border-radius: 8px;
+      width: 380px;
+      overflow: hidden;
+    }
+
+    .win-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #2c2c2e;
+      padding: 0 0 0 12px;
+      height: 28px;
+    }
+
+    .win-bar-title {
+      color: #fff;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .win-close {
+      background: var(--red);
+      border: none;
+      color: #fff;
+      width: 28px;
+      height: 28px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    .login-body {
+      padding: 20px 28px;
+      background: var(--sidebar);
+    }
+
+    .login-logo {
+      text-align: center;
+      font-size: 20px;
+      font-weight: 800;
+      color: var(--accent);
+      margin: 10px 0 18px;
+    }
+
+    .fi {
+      width: 100%;
+      padding: 8px 10px;
+      border-radius: 6px;
+      border: 1.5px solid var(--control);
+      background: var(--bg);
+      font-size: 12px;
+      color: var(--text);
+      margin-bottom: 8px;
+      outline: none;
+    }
+
+    .fi:focus {
+      border-color: var(--accent);
+    }
+
+    .err-msg {
+      background: rgba(255, 59, 48, .15);
+      border: 1.5px solid var(--red);
+      border-radius: 4px;
+      color: var(--red);
+      font-size: 11px;
+      padding: 5px 8px;
+      margin-bottom: 8px;
+      display: none;
+    }
+
+    .btn-p {
+      width: 100%;
+      padding: 9px;
+      border-radius: 8px;
+      border: none;
+      background: var(--accent);
+      color: #fff;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      margin-bottom: 8px;
+    }
+
+    .btn-p:hover {
+      opacity: .85;
+    }
+
+    .btn-s {
+      width: 100%;
+      padding: 9px;
+      border-radius: 8px;
+      border: none;
+      background: var(--control);
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .divl {
+      border: none;
+      border-top: 1px solid var(--control);
+      margin: 8px 0;
+    }
+
+    .note {
+      font-size: 10px;
+      color: #8e8e93;
+      margin-top: 6px;
+    }
+
+    /* ════════════ ② 회원가입 ════════════ */
+    #s-signup {
+      align-items: center;
+      justify-content: center;
+    }
+
+    .signup-box {
+      background: var(--sidebar);
+      border: 2px solid var(--control);
+      border-radius: 8px;
+      width: 360px;
+      overflow: hidden;
+    }
+
+    .signup-title {
+      text-align: center;
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text);
+      padding: 14px 0 10px;
+    }
+
+    .signup-body {
+      padding: 4px 28px 20px;
+    }
+
+    .back-link {
+      text-align: center;
+      color: var(--accent);
+      font-size: 11px;
+      cursor: pointer;
+      margin-top: 10px;
+    }
+
+    /* ════════════ ③ 장치 확인 (v8: 체크박스 선택 방식) ════════════ */
+    #s-device {
+      align-items: center;
+      justify-content: center;
+    }
+
+    .device-box {
+      background: var(--sidebar);
+      border: 2px solid var(--control);
+      border-radius: 8px;
+      width: 500px;
+      overflow: hidden;
+    }
+
+    .device-body {
+      padding: 16px 20px;
+    }
+
+    .device-sub {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 8px;
+    }
+
+    .device-list {
+      background: var(--bg);
+      border: 1px solid var(--control);
+      border-radius: 4px;
+      overflow: hidden;
+      margin-bottom: 10px;
+    }
+
+    .device-group {
+      background: var(--control);
+      padding: 4px 10px;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .device-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px 14px;
+      font-size: 11px;
+      border-bottom: 1px solid var(--control);
+    }
+
+    .device-item:last-child {
+      border-bottom: none;
+    }
+
+    .d-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .d-check {
+      width: 14px;
+      height: 14px;
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+
+    .d-name {
+      color: var(--text-light);
+    }
+
+    .d-new {
+      font-size: 9px;
+      font-weight: 700;
+      background: rgba(243, 115, 33, .15);
+      color: var(--accent);
+      padding: 1px 5px;
+      border-radius: 3px;
+    }
+
+    .status-ok {
+      color: var(--green);
+      font-size: 10px;
+    }
+
+    .status-err {
+      color: var(--red);
+      font-size: 10px;
+    }
+
+    .device-legend {
+      font-size: 10px;
+      color: #8e8e93;
+      margin-bottom: 10px;
+    }
+
+    .device-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .btn-device-add {
+      flex: 1;
+      padding: 8px;
+      border-radius: 6px;
+      border: none;
+      background: var(--accent);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .btn-device-skip {
+      flex: 1;
+      padding: 8px;
+      border-radius: 6px;
+      border: none;
+      background: var(--control);
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    /* ════════════ 공통 레이아웃 ════════════ */
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--sidebar);
+      height: 28px;
+      padding: 0 8px;
+      flex-shrink: 0;
+    }
+
+    .topbar-logo {
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .topbar-logo span {
+      color: var(--accent);
+    }
+
+    .topbar-btns {
+      display: flex;
+      gap: 2px;
+    }
+
+    .topbar-btn {
+      background: var(--control);
+      border: 1.5px solid #555;
+      color: var(--text);
+      width: 28px;
+      height: 22px;
+      border-radius: 3px;
+      cursor: pointer;
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .topbar-btn:hover {
+      background: #4a4a4c;
+    }
+
+    .main-body {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* 사이드바 */
+    .sidebar {
+      width: 200px;
+      min-width: 200px;
+      background: var(--sidebar);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+
+    .sb-tabs {
+      display: flex;
+    }
+
+    .sb-tab {
+      flex: 1;
+      padding: 5px 0;
+      text-align: center;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+    }
+
+    .sb-tab.on {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    .sb-tab.off {
+      background: var(--control);
+      color: var(--text-sec);
+    }
+
+    .ch-tree {
+      flex: 0 0 50%;
+      overflow-y: auto;
+      padding: 4px 0;
+    }
+
+    .ch-tree::-webkit-scrollbar {
+      width: 3px;
+    }
+
+    .ch-tree::-webkit-scrollbar-thumb {
+      background: var(--control);
+    }
+
+    .tree-group {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text);
+      padding: 4px 10px;
+    }
+
+    .tree-item {
+      font-size: 10px;
+      color: var(--text-light);
+      padding: 3px 18px;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-radius: 3px;
+      margin: 0 4px;
+    }
+
+    .tree-item:hover {
+      background: var(--control);
+    }
+
+    .tree-item.sel {
+      color: var(--accent);
+    }
+
+    .tree-item.disc {
+      color: var(--text-sec);
+    }
+
+    .sb-ctrl {
+      flex: 1;
+      padding: 8px;
+      border-top: 1px solid var(--control);
+      overflow-y: auto;
+    }
+
+    .ctrl-lbl {
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--text-sec);
+      margin-bottom: 4px;
+    }
+
+    .zoom-row {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin-bottom: 8px;
+    }
+
+    .slider-t {
+      flex: 1;
+      height: 4px;
+      background: var(--control);
+      border-radius: 2px;
+      position: relative;
+    }
+
+    .slider-th {
+      position: absolute;
+      width: 10px;
+      height: 10px;
+      background: var(--accent);
+      border-radius: 50%;
+      top: -3px;
+      left: 40%;
+    }
+
+    .ctrl-btn {
+      background: var(--control);
+      border: 1px solid var(--text-sec);
+      color: var(--text);
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 3px;
+      cursor: pointer;
+    }
+
+    .back-sb {
+      font-size: 10px;
+      color: var(--accent);
+      cursor: pointer;
+      padding: 4px 10px;
+    }
+
+    .back-sb:hover {
+      text-decoration: underline;
+    }
+
+    .layout-row {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 6px 10px;
+    }
+
+    .layout-lbl {
+      font-size: 10px;
+      color: var(--text-sec);
+    }
+
+    .lay-btn {
+      background: var(--control);
+      border: 1px solid var(--text-sec);
+      color: var(--text-sec);
+      width: 22px;
+      height: 18px;
+      border-radius: 3px;
+      cursor: pointer;
+      font-size: 10px;
+    }
+
+    .lay-btn.on {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+
+    .sb-bottom {
+      padding: 8px;
+      border-top: 1px solid var(--control);
+      display: flex;
+      gap: 4px;
+    }
+
+    .sb-btn {
+      flex: 1;
+      padding: 5px 0;
+      border-radius: 5px;
+      border: none;
+      font-size: 10px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .btn-snap {
+      background: var(--control);
+      color: var(--text);
+    }
+
+    .btn-clip {
+      background: var(--red);
+      color: #fff;
+    }
+
+    /* 중앙 뷰 */
+    .center-v {
+      flex: 1;
+      background: var(--video);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .grid-v {
+      flex: 1;
+      display: grid;
+    }
+
+    .g4 {
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: 1fr 1fr;
+    }
+
+    .g6 {
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: 1fr 1fr 1fr;
+    }
+
+    .g9 {
+      grid-template-columns: 1fr 1fr 1fr;
+      grid-template-rows: 1fr 1fr 1fr;
+    }
+
+    .vcell {
+      background: var(--bg);
+      border: 1px solid var(--control);
+      position: relative;
+      cursor: pointer;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .vcell:hover .cx {
+      display: flex;
+    }
+
+    .c-ts {
+      position: absolute;
+      top: 5px;
+      left: 0;
+      right: 0;
+      text-align: center;
+      font-size: 9px;
+      color: #fff;
+      white-space: nowrap;
+    }
+
+    .c-ts.ugv {
+      color: var(--yellow);
+    }
+
+    .c-st {
+      position: absolute;
+      top: 5px;
+      right: 8px;
+      font-size: 10px;
+    }
+
+    .c-ch {
+      position: absolute;
+      bottom: 5px;
+      left: 8px;
+      font-size: 9px;
+      color: #fff;
+    }
+
+    .c-ch.ugv {
+      color: var(--yellow);
+    }
+
+    .c-clip {
+      position: absolute;
+      bottom: 5px;
+      left: 0;
+      right: 0;
+      text-align: center;
+      font-size: 9px;
+      color: var(--red);
+    }
+
+    .cx {
+      display: none;
+      position: absolute;
+      top: 4px;
+      right: 4px;
+      width: 18px;
+      height: 18px;
+      background: rgba(255, 59, 48, .8);
+      border-radius: 3px;
+      border: none;
+      color: #fff;
+      font-size: 10px;
+      cursor: pointer;
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+    }
+
+    .nosig {
+      background: #000;
+    }
+
+    .nosig-txt {
+      color: var(--control);
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .cell-empty-txt {
+      color: #333;
+      font-size: 11px;
+    }
+
+    /* 이벤트뷰 */
+    .ev-view {
+      width: 420px;
+      min-width: 420px;
+      background: var(--sidebar);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+
+    .ev-hdr {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 12px 4px;
+    }
+
+    .ev-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--accent);
+    }
+
+    .ev-srch-btn {
+      background: none;
+      border: none;
+      color: var(--text-sec);
+      cursor: pointer;
+      font-size: 14px;
+      padding: 2px 4px;
+      border-radius: 3px;
+    }
+
+    .ev-srch-btn:hover {
+      background: var(--control);
+    }
+
+    .ev-sub {
+      font-size: 9px;
+      color: var(--text-sec);
+      padding: 0 12px 6px;
+    }
+
+    .ev-cards {
+      padding: 0 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .ev-card {
+      background: var(--control);
+      border: 1.5px solid var(--accent);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+
+    .ev-card-img {
+      width: 100%;
+      height: 180px;
+      background: var(--bg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-sec);
+      font-size: 10px;
+    }
+
+    .ev-card-info {
+      padding: 5px 8px;
+      font-size: 10px;
+      color: var(--text-light);
+    }
+
+    .ev-card-btn {
+      display: block;
+      width: auto;
+      margin: 0 8px 8px;
+      padding: 6px;
+      border-radius: 5px;
+      border: none;
+      background: var(--red);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .ev-prev-lbl {
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--text-sec);
+      padding: 8px 12px 4px;
+    }
+
+    .ev-prev-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0 10px;
+    }
+
+    .ev-prev-list::-webkit-scrollbar {
+      width: 3px;
+    }
+
+    .ev-prev-list::-webkit-scrollbar-thumb {
+      background: var(--control);
+    }
+
+    .ev-item {
+      background: var(--bg);
+      border: 1px solid var(--control);
+      border-radius: 4px;
+      padding: 6px 10px;
+      margin-bottom: 4px;
+      font-size: 10px;
+      color: var(--text-light);
+      cursor: pointer;
+    }
+
+    .ev-item:hover {
+      background: var(--control);
+    }
+
+    /* PTZ */
+    .ptz-dpad {
+      display: grid;
+      grid-template-columns: repeat(3, 24px);
+      grid-template-rows: repeat(3, 24px);
+      gap: 2px;
+      margin-bottom: 8px;
+    }
+
+    .ptz-btn {
+      background: var(--accent);
+      border: none;
+      color: #fff;
+      font-size: 10px;
+      border-radius: 3px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .ptz-c {
+      background: var(--control);
+      color: var(--text-sec);
+    }
+
+    /* UGV 전체화면 - v8: 1:1 분할 */
+    .ugv-split {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .ugv-video {
+      flex: 1;
+      background: var(--video);
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 0;
+    }
+
+    .ugv-video-inner {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* letterbox: 영상은 원본 비율 유지 */
+    .ugv-video-placeholder {
+      background: #111;
+      max-width: 100%;
+      max-height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-sec);
+      font-size: 11px;
+      padding: 10px;
+    }
+
+    .ar-16x9,
+    .ar-4x3,
+    .ar-1x1 {
+      width: 100%;
+      height: 100%;
+    }
+
+    .ugv-map {
+      flex: 1;
+      background: #e5e5ea;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 0;
+    }
+
+    .ugv-map-lbl {
+      font-size: 12px;
+      font-weight: 700;
+      color: #3a3a3c;
+    }
+
+    .ugv-pin {
+      position: absolute;
+      font-size: 24px;
+      top: 45%;
+      left: 52%;
+    }
+
+    .ugv-dpad {
+      position: absolute;
+      bottom: 12px;
+      right: 12px;
+      display: grid;
+      grid-template-columns: repeat(3, 28px);
+      grid-template-rows: repeat(3, 28px);
+      gap: 2px;
+    }
+
+    .dp-btn {
+      background: transparent;
+      border: none;
+      color: #1a1a1a;
+      font-size: 16px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 4px;
+    }
+
+    .dp-btn:hover {
+      background: rgba(0, 0, 0, .15);
+    }
+
+    .dp-stop {
+      color: var(--red);
+    }
+
+    .ugv-end-btn {
+      position: absolute;
+      bottom: 12px;
+      left: 12px;
+      background: var(--red);
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 6px 14px;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .ugv-rssi {
+      position: absolute;
+      top: 8px;
+      right: 12px;
+      font-size: 9px;
+      color: var(--yellow);
+    }
+
+    .ugv-ts {
+      position: absolute;
+      top: 8px;
+      left: 0;
+      right: 0;
+      text-align: center;
+      font-size: 10px;
+      color: var(--yellow);
+    }
+
+    /* Playback - v8: 타임라인 탐색, 파일 직접 노출 없음 */
+    .file-tree {
+      flex: 1;
+      padding: 6px 0;
+      overflow-y: auto;
+    }
+
+    .ft-date {
+      font-size: 10px;
+      font-weight: 700;
+      color: #fff;
+      padding: 4px 10px;
+      cursor: pointer;
+    }
+
+    .ft-ch {
+      font-size: 10px;
+      color: var(--accent);
+      padding: 2px 22px;
+      cursor: pointer;
+    }
+
+    .ft-ch:hover {
+      color: #fff;
+    }
+
+    .ft-ch.sel {
+      color: #fff;
+      font-weight: 700;
+    }
+
+    .ft-note {
+      font-size: 9px;
+      color: var(--text-sec);
+      padding: 2px 32px;
+    }
+
+    .pb-area {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .pb-video {
+      flex: 1;
+      background: var(--video);
+      position: relative;
+    }
+
+    .pb-ts {
+      position: absolute;
+      top: 8px;
+      left: 0;
+      right: 0;
+      text-align: center;
+      font-size: 10px;
+      color: #fff;
+    }
+
+    .pb-ch-lbl {
+      position: absolute;
+      bottom: 52px;
+      left: 12px;
+      font-size: 10px;
+      color: #fff;
+    }
+
+    /* 타임라인 */
+    .pb-timeline-wrap {
+      height: 60px;
+      background: var(--sidebar);
+      border-top: 1px solid var(--control);
+      padding: 6px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .pb-top-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .pb-play {
+      background: var(--control);
+      border: 1px solid #555;
+      color: var(--text);
+      width: 28px;
+      height: 24px;
+      border-radius: 3px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+
+    .pb-time {
+      font-size: 10px;
+      color: var(--text-sec);
+      white-space: nowrap;
+    }
+
+    .pb-bar-bg {
+      flex: 1;
+      height: 6px;
+      background: var(--control);
+      border-radius: 3px;
+      position: relative;
+      cursor: pointer;
+    }
+
+    .pb-bar-fill {
+      height: 100%;
+      width: 30%;
+      background: var(--accent);
+      border-radius: 3px;
+    }
+
+    /* 시간 눈금 */
+    .pb-scale {
+      display: flex;
+      justify-content: space-between;
+      padding: 0 2px;
+    }
+
+    .pb-scale span {
+      font-size: 8px;
+      color: var(--text-sec);
+    }
+
+    /* 설정 팝업 - v8: 백업경로 제거 */
+    .overlay {
+      display: none;
+      position: absolute;
+      inset: 0;
+      background: rgba(0, 0, 0, .6);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .overlay.show {
+      display: flex;
+    }
+
+    .pop-box {
+      background: var(--sidebar);
+      border: 2px solid var(--control);
+      border-radius: 8px;
+      overflow: hidden;
+      min-width: 340px;
+    }
+
+    .pop-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--control);
+      height: 28px;
+      padding-left: 12px;
+    }
+
+    .pop-bar.danger {
+      background: var(--red);
+    }
+
+    .pop-bar-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .pop-bar.danger .pop-bar-title {
+      color: #fff;
+    }
+
+    .pop-close {
+      background: var(--red);
+      border: none;
+      color: #fff;
+      width: 28px;
+      height: 28px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    .pop-body {
+      padding: 16px 20px;
+    }
+
+    .pop-sec {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--accent);
+      margin-bottom: 4px;
+    }
+
+    .pop-hr {
+      border: none;
+      border-top: 1.5px solid var(--accent);
+      margin-bottom: 8px;
+    }
+
+    .pop-row {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+
+    .pop-item {
+      background: var(--bg);
+      border: 1px solid var(--control);
+      border-radius: 4px;
+      padding: 5px 8px;
+      font-size: 11px;
+      color: var(--text-light);
+      flex: 1;
+    }
+
+    .pop-path {
+      background: var(--bg);
+      border: 1px solid var(--control);
+      border-radius: 4px;
+      padding: 5px 8px;
+      font-size: 10px;
+      color: var(--text-light);
+      margin-bottom: 5px;
+    }
+
+    .pop-note {
+      font-size: 10px;
+      color: #8e8e93;
+      margin-bottom: 6px;
+    }
+
+    .btn-sm {
+      padding: 4px 10px;
+      border-radius: 4px;
+      border: none;
+      background: var(--accent);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .pop-footer {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 10px;
+    }
+
+    .pop-img {
+      width: 100%;
+      height: 180px;
+      background: var(--bg);
+      border-radius: 4px;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-sec);
+      font-size: 11px;
+    }
+
+    .pop-info {
+      font-size: 11px;
+      color: var(--text-light);
+      line-height: 1.8;
+      margin-bottom: 12px;
+    }
+
+    .pop-warn {
+      background: rgba(255, 59, 48, .15);
+      border: 1.5px solid var(--red);
+      border-radius: 4px;
+      color: var(--red);
+      font-size: 11px;
+      padding: 7px 10px;
+      margin-bottom: 12px;
+    }
+
+    .pop-msg {
+      font-size: 13px;
+      color: var(--text);
+      text-align: center;
+      padding: 10px 0 14px;
+    }
+
+    .pop-btns {
+      display: flex;
+      gap: 8px;
+    }
+
+    .btn-danger {
+      flex: 1;
+      padding: 9px;
+      border-radius: 6px;
+      border: none;
+      background: var(--red);
+      color: #fff;
+      font-weight: 700;
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .btn-cancel {
+      flex: 1;
+      padding: 9px;
+      border-radius: 6px;
+      border: none;
+      background: var(--control);
+      color: var(--text);
+      font-weight: 700;
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    /* 이벤트 검색 팝업 */
+    #pop-search .pop-box {
+      min-width: 520px;
+      background: #2c2c2e;
+      border-color: #3a3a3c;
+    }
+
+    #pop-search .pop-bar {
+      background: #3a3a3c;
+    }
+
+    #pop-search .pop-bar-title {
+      color: var(--accent);
+    }
+
+    .s-body {
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .s-lbl {
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--accent);
+      letter-spacing: .05em;
+      margin-bottom: 6px;
+    }
+
+    .s-date-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .s-di {
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--control);
+      border-radius: 5px;
+      padding: 6px 8px;
+      color: #fff;
+      font-size: 11px;
+      outline: none;
+    }
+
+    .s-di:focus {
+      border-color: var(--accent);
+    }
+
+    .s-checks {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .s-ck {
+      background: var(--bg);
+      border: 1px solid var(--control);
+      border-radius: 5px;
+      padding: 5px 10px;
+      cursor: pointer;
+      font-size: 11px;
+      color: var(--text-light);
+      user-select: none;
+    }
+
+    .s-ck.on {
+      border-color: var(--accent);
+      background: rgba(243, 115, 33, .12);
+      color: #fff;
+    }
+
+    .s-div {
+      border: none;
+      border-top: 1px solid var(--control);
+    }
+
+    .s-btn {
+      width: 100%;
+      padding: 9px;
+      border-radius: 5px;
+      border: none;
+      background: var(--accent);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .s-results {
+      background: var(--bg);
+      border: 1px solid var(--control);
+      border-radius: 5px;
+      overflow: hidden;
+    }
+
+    .s-r-hdr {
+      display: flex;
+      justify-content: space-between;
+      padding: 6px 10px;
+      background: #2c2c2e;
+      border-bottom: 1px solid var(--control);
+      font-size: 10px;
+      color: var(--text-sec);
+    }
+
+    .s-r-hdr span {
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    .s-r-list {
+      max-height: 160px;
+      overflow-y: auto;
+    }
+
+    .s-r-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 10px;
+      border-bottom: 1px solid #2c2c2e;
+      cursor: pointer;
+    }
+
+    .s-r-item:hover {
+      background: #2c2c2e;
+    }
+
+    .s-tag {
+      font-size: 9px;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 3px;
+      flex-shrink: 0;
+    }
+
+    .tag-s {
+      background: rgba(255, 59, 48, .2);
+      color: var(--red);
+    }
+
+    .tag-m {
+      background: rgba(255, 204, 0, .2);
+      color: var(--yellow);
+    }
+
+    .s-r-info .s-r-main {
+      font-size: 11px;
+      color: var(--text-light);
+    }
+
+    .s-r-info .s-r-sub {
+      font-size: 9px;
+      color: var(--text-sec);
+    }
+
+    /* 스낵바 (Playback 중 이벤트 - 우측 하단) */
+    .snackbar {
+      display: none;
+      position: absolute;
+      bottom: 20px;
+      right: 20px;
+      background: #333;
+      color: #fff;
+      font-size: 11px;
+      padding: 8px 14px;
+      border-radius: 6px;
+      z-index: 300;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .snackbar.show {
+      display: flex;
+    }
+
+    .snackbar-close {
+      background: none;
+      border: none;
+      color: var(--text-sec);
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    /* 토스트 */
+    .toast {
+      display: none;
+      position: absolute;
+      bottom: 20px;
+      left: 0;
+      right: 0;
+      text-align: center;
+      background: var(--green);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 8px 14px;
+      border-radius: 6px;
+      z-index: 300;
+    }
+
+    .toast.show {
+      display: block;
+    }
+
+    /* ── v8.1 추가: 활성 셀, 클립 상태, 타임라인 이벤트 마커 ── */
+    .vcell.active {
+      outline: 2px solid var(--accent);
+      outline-offset: -2px;
+    }
+
+    .sb-btn.btn-clip.recording {
+      background: #b3261e;
+    }
+
+    /* 저장중지 버튼용(시각적 강조) */
+    .toast.err {
+      background: var(--red);
+    }
+
+    .toast.info {
+      background: var(--accent);
+    }
+
+    .topbar-status {
+      font-size: 10px;
+      color: var(--text-sec);
+      margin-left: 10px;
+    }
+
+    .topbar-status b {
+      color: var(--green);
+    }
+
+    .pb-bar-bg {
+      position: relative;
+    }
+
+    .pb-marker {
+      position: absolute;
+      top: -3px;
+      width: 2px;
+      height: 12px;
+      background: var(--red);
+      opacity: .9;
+    }
+
+    .pb-gap {
+      position: absolute;
+      top: 0;
+      height: 100%;
+      background: rgba(255, 255, 255, .10);
+      border-radius: 3px;
+    }
+
+    .pb-speed {
+      background: var(--control);
+      border: 1px solid #555;
+      color: var(--accent);
+      height: 24px;
+      padding: 0 8px;
+      border-radius: 3px;
+      cursor: pointer;
+      font-size: 10px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .pb-speed:hover {
+      background: #4a4a4c;
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- ① 로그인 -->
+  <div id="s-login" class="screen active">
+    <div class="login-box">
+      <div class="win-bar"><span class="win-bar-title">VMS — 로그인</span><button class="win-close">✕</button></div>
+      <div class="login-body">
+        <div class="login-logo">🌲 VMS</div>
+        <input class="fi" type="text" placeholder="아이디" id="lid">
+        <input class="fi" type="password" placeholder="비밀번호" id="lpw">
+        <div class="err-msg" id="lerr">⚠ 아이디 또는 비밀번호가 올바르지 않습니다</div>
+        <button class="btn-p" onclick="doLogin()">로그인</button>
+        <hr class="divl">
+        <button class="btn-s" onclick="goTo('s-signup')">회원가입</button>
+        <p class="note">* v1: ONVIF 미연동(하드코딩 장치 목록 사용) / 최소 해상도 1600×900</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ② 회원가입 -->
+  <div id="s-signup" class="screen">
+    <div class="signup-box">
+      <div class="win-bar"><span class="win-bar-title">VMS — 회원가입</span><button class="win-close"
+          onclick="goTo('s-login')">✕</button></div>
+      <div class="signup-body">
+        <div class="signup-title">새 계정 만들기</div>
+        <input class="fi" type="text" placeholder="이름">
+        <input class="fi" type="text" placeholder="아이디">
+        <input class="fi" type="password" placeholder="비밀번호">
+        <input class="fi" type="password" placeholder="비밀번호 확인">
+        <button class="btn-p" onclick="goTo('s-login')">회원가입</button>
+        <div class="back-link" onclick="goTo('s-login')">← 로그인으로 돌아가기</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ③ 장치 확인 (v8: 체크박스 + 추가 버튼) -->
+  <div id="s-device" class="screen">
+    <div class="device-box">
+      <div class="win-bar"><span class="win-bar-title">VMS — 장치 확인</span><button class="win-close">✕</button></div>
+      <div class="device-body">
+        <div class="device-sub">v1 하드코딩 장치 목록 — 추가할 장치를 선택하세요</div>
+        <div class="device-list">
+          <div class="device-group">📷 CCTV</div>
+          <div class="device-item">
+            <div class="d-left"><input class="d-check" type="checkbox" disabled><span class="d-name">Channel 1
+                (192.168.1.101)</span></div>
+            <span class="status-err">🔴 연결 안됨</span>
+          </div>
+          <div class="device-item">
+            <div class="d-left"><input class="d-check" type="checkbox" checked><span class="d-name">Channel 2
+                (192.168.1.102)</span></div>
+            <span class="status-ok">🟢 정상</span>
+          </div>
+          <div class="device-item">
+            <div class="d-left"><input class="d-check" type="checkbox" checked><span class="d-name">Channel 3
+                (192.168.1.103)</span></div>
+            <span class="status-ok">🟢 정상</span>
+          </div>
+          <div class="device-group">🚗 UGV</div>
+          <div class="device-item">
+            <div class="d-left"><input class="d-check" type="checkbox" checked><span class="d-name">Cam 1
+                (192.168.1.200)</span><span class="d-new">NEW</span></div>
+            <span style="color:#FFCC00;font-size:10px">🟡 연결 지연</span>
+          </div>
+        </div>
+        <div class="device-legend">🟢 정상 &nbsp;|&nbsp; 🟡 연결 지연 &nbsp;|&nbsp; 🔴 연결 안됨 &nbsp;|&nbsp; NEW = v1 데모용 태그
+        </div>
+        <div class="device-actions">
+          <button class="btn-device-add" onclick="goTo('s-main')">VMS 시작</button>
+          <button class="btn-device-skip" onclick="goTo('s-login')">← 로그인으로 돌아가기</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ⑤ VMS 메인 -->
+  <div id="s-main" class="screen" style="flex-direction:column">
+    <div class="topbar">
+      <span class="topbar-logo">🌲 <span>VMS</span><span class="topbar-status">ARCHIVE: <b>ON</b> · 1min seg · 3d /
+          10GB</span> | 산림 감시·대응 시스템</span>
+      <div class="topbar-btns">
+        <button class="topbar-btn" onclick="showPop('pop-settings')" title="설정">⚙️</button>
+        <button class="topbar-btn" onclick="showLogout()" title="로그아웃">🚪</button>
+      </div>
+    </div>
+    <div class="main-body">
+      <div class="sidebar">
+        <div class="sb-tabs">
+          <div class="sb-tab on">채널</div>
+          <div class="sb-tab off" onclick="goTo('s-pb')">이전영상</div>
+        </div>
+        <div class="ch-tree">
+          <div class="tree-group">📷 CCTV</div>
+          <div class="tree-item disc" draggable="true" ondragstart="dragCh(event,'Channel 1')">ㄴ Channel 1
+            <span>🔴</span>
+          </div>
+          <div class="tree-item" draggable="true" ondragstart="dragCh(event,'Channel 2')">ㄴ Channel 2 <span>🟢</span>
+          </div>
+          <div class="tree-item" draggable="true" ondragstart="dragCh(event,'Channel 3')">ㄴ Channel 3 <span>🟢</span>
+          </div>
+          <div class="tree-group">🚗 UGV</div>
+          <div class="tree-item" draggable="true" ondragstart="dragCh(event,'UGV Cam 1')" ondblclick="goTo('s-ugv')">ㄴ
+            Cam 1 <span>🟡</span></div>
+        </div>
+        <div class="sb-ctrl">
+          <div class="ctrl-lbl">🔍 Zoom</div>
+          <div class="zoom-row">
+            <button class="ctrl-btn">－</button>
+            <div class="slider-t">
+              <div class="slider-th"></div>
+            </div>
+            <button class="ctrl-btn">＋</button>
+          </div>
+          <div class="ctrl-lbl">🎯 Focus</div>
+          <div class="zoom-row">
+            <button class="ctrl-btn" style="font-size:9px">NEAR</button>
+            <div class="slider-t">
+              <div class="slider-th" style="left:10%"></div>
+            </div>
+            <button class="ctrl-btn" style="font-size:9px">FAR</button>
+          </div>
+          <div class="layout-row">
+            <span class="layout-lbl">레이아웃</span>
+            <button class="lay-btn on" onclick="setLayout(4)">4</button>
+            <button class="lay-btn" onclick="setLayout(6)">6</button>
+            <button class="lay-btn" onclick="setLayout(9)">9</button>
+          </div>
+        </div>
+        <div class="sb-bottom">
+          <button class="sb-btn btn-snap" onclick="showToast()">📷 스냅샷</button>
+          <button class="sb-btn btn-clip" id="clip-btn-main" onclick="toggleClipForActive()">⏺ 클립</button>
+        </div>
+      </div>
+      <div class="center-v">
+        <div class="grid-v g4" id="grid-main">
+          <div class="vcell" id="cell-0" onclick="selectCell(0)" ondblclick="goTo('s-cctv')"
+            ondragover="event.preventDefault()" ondrop="dropCh(event,0)">
+            <div class="c-ts">2026-02-19 14:32:10</div>
+            <div class="c-st">🟢</div>
+            <div class="c-ch">Channel 2</div>
+            <button class="cx" onclick="clearCell(event,0)">✕</button>
+          </div>
+          <div class="vcell" id="cell-1" onclick="selectCell(1)" ondblclick="goTo('s-cctv')"
+            ondragover="event.preventDefault()" ondrop="dropCh(event,1)">
+            <div class="c-ts">2026-02-19 14:32:10</div>
+            <div class="c-st">🟢</div>
+            <div class="c-ch">Channel 3</div>
+            <button class="cx" onclick="clearCell(event,1)">✕</button>
+          </div>
+          <div class="vcell" id="cell-2" onclick="selectCell(2)" ondblclick="goTo('s-ugv')"
+            ondragover="event.preventDefault()" ondrop="dropCh(event,2)">
+            <div class="c-ts ugv">2026-02-19 14:32:10</div>
+            <div class="c-st">🟡</div>
+            <div class="c-ch ugv">UGV Cam 1</div>
+            <button class="cx" onclick="clearCell(event,2)">✕</button>
+          </div>
+          <div class="vcell nosig" id="cell-3" onclick="selectCell(3)" ondragover="event.preventDefault()"
+            ondrop="dropCh(event,3)">
+            <div class="nosig-txt">NO SIGNAL</div>
+            <div class="c-ch" style="color:#3a3a3c">Channel 1 🔴</div>
+            <button class="cx" onclick="clearCell(event,3)">✕</button>
+          </div>
+        </div>
+      </div>
+      <div class="ev-view">
+        <div class="ev-hdr"><span class="ev-title">이벤트 뷰</span><button class="ev-srch-btn"
+            onclick="showPop('pop-search')" title="이벤트 검색">🔍</button></div>
+        <div class="ev-sub">전체 스크롤 | 클릭 → 상세</div>
+        <div class="ev-scroll" style="flex:1;overflow-y:auto;padding:0 10px">
+          <div class="ev-card" onclick="showPop('pop-ev-detail')" style="cursor:pointer">
+            <div class="ev-card-img">[사진 16:9]</div>
+            <div class="ev-card-info">2026-02-19 14:30 | Ch1 | 연기 감지</div>
+            <button class="ev-card-btn" onclick="event.stopPropagation();showUGV()">🚗 UGV 출동</button>
+          </div>
+          <div class="ev-card" onclick="showPop('pop-ev-detail')" style="margin-top:8px;cursor:pointer">
+            <div class="ev-card-img">[사진 16:9]</div>
+            <div class="ev-card-info">2026-02-19 14:25 | Ch2 | 움직임 감지</div>
+            <button class="ev-card-btn" onclick="event.stopPropagation();showUGV()">🚗 UGV 출동</button>
+          </div>
+          <div class="ev-item" style="margin-top:8px" onclick="showPop('pop-ev-detail')">2026-02-19 | Ch2 | 움직임 감지</div>
+          <div class="ev-item" onclick="showPop('pop-ev-detail')">2026-02-19 | Ch1 | 연기 감지</div>
+          <div class="ev-item" onclick="showPop('pop-ev-detail')">2026-02-18 | UGV | 침입 감지</div>
+          <div class="ev-item" onclick="showPop('pop-ev-detail')">2026-02-18 | Ch2 | 움직임 감지</div>
+          <div class="ev-item" onclick="showPop('pop-ev-detail')">2026-02-17 | Ch1 | 연기 감지</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ⑥ CCTV 전체화면 -->
+  <div id="s-cctv" class="screen" style="flex-direction:column">
+    <div class="topbar">
+      <span class="topbar-logo">🌲 <span>VMS</span><span class="topbar-status">ARCHIVE: <b>ON</b> · 1min seg · 3d /
+          10GB</span> | Channel 2 — 전체화면</span>
+      <div class="topbar-btns">
+        <button class="topbar-btn" onclick="showPop('pop-settings')">⚙️</button>
+        <button class="topbar-btn" onclick="showLogout()">🚪</button>
+      </div>
+    </div>
+    <div class="main-body">
+      <div class="sidebar">
+        <div class="sb-tabs">
+          <div class="sb-tab on">채널</div>
+          <div class="sb-tab off" onclick="goTo('s-pb')">이전영상</div>
+        </div>
+        <div class="ch-tree">
+          <div class="tree-group">📷 CCTV</div>
+          <div class="tree-item disc">ㄴ Channel 1 <span>🔴</span></div>
+          <div class="tree-item sel">ㄴ ▶ Channel 2 <span>🟢</span></div>
+          <div class="tree-item">ㄴ Channel 3 <span>🟢</span></div>
+          <div class="tree-group">🚗 UGV</div>
+          <div class="tree-item" ondblclick="goTo('s-ugv')">ㄴ Cam 1 <span>🟡</span></div>
+        </div>
+        <div class="sb-ctrl">
+          <div class="back-sb" onclick="goTo('s-main')">← 멀티뷰로 돌아가기</div>
+          <div class="ctrl-lbl">🔍 Zoom</div>
+          <div class="zoom-row">
+            <button class="ctrl-btn">－</button>
+            <div class="slider-t">
+              <div class="slider-th"></div>
+            </div>
+            <button class="ctrl-btn">＋</button>
+          </div>
+          <div class="ctrl-lbl">🎯 Focus</div>
+          <div class="zoom-row">
+            <button class="ctrl-btn" style="font-size:9px">NEAR</button>
+            <div class="slider-t">
+              <div class="slider-th" style="left:10%"></div>
+            </div>
+            <button class="ctrl-btn" style="font-size:9px">FAR</button>
+          </div>
+        </div>
+        <div class="sb-bottom">
+          <button class="sb-btn btn-snap" onclick="showToast()">📷 스냅샷</button>
+          <button class="sb-btn btn-clip" id="clip-btn-cctv" onclick="toggleClipForActive()">⏺ 클립</button>
+        </div>
+      </div>
+      <div
+        style="flex:1;background:var(--video);position:relative;display:flex;align-items:center;justify-content:center">
+        <div style="position:absolute;top:8px;left:0;right:0;text-align:center;font-size:10px;color:#fff">2026-02-19
+          14:32:10</div>
+        <div style="position:absolute;top:8px;right:12px;font-size:11px">🟢</div>
+        <div style="position:absolute;bottom:8px;left:12px;font-size:10px;color:#fff">Channel 2</div>
+        <div id="osd-clip-cctv"
+          style="position:absolute;bottom:8px;left:0;right:0;text-align:center;font-size:10px;color:var(--red);display:none">
+          ⏺ CLIP 00:00:00</div>
+      </div>
+      <div class="ev-view">
+        <div class="ev-hdr"><span class="ev-title">이벤트 뷰 [고정]</span><button class="ev-srch-btn"
+            onclick="showPop('pop-search')">🔍</button></div>
+        <div class="ev-scroll" style="flex:1;overflow-y:auto;padding:0 10px">
+          <div class="ev-card">
+            <div class="ev-card-img">[사진 16:9]</div>
+            <div class="ev-card-info">2026-02-19 14:30 | Ch1 | 연기 감지</div>
+            <button class="ev-card-btn" onclick="showUGV()">🚗 UGV 출동</button>
+          </div>
+          <div class="ev-item" style="margin-top:8px" onclick="showPop('pop-ev-detail')">2026-02-19 | Ch2 | 움직임 감지</div>
+          <div class="ev-item" onclick="showPop('pop-ev-detail')">2026-02-18 | UGV | 침입 감지</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ⑦ UGV 전체화면 (v8: 1:1 분할 + letterbox) -->
+  <div id="s-ugv" class="screen" style="flex-direction:column">
+    <div class="topbar">
+      <span class="topbar-logo">🌲 <span>VMS</span><span class="topbar-status">ARCHIVE: <b>ON</b> · 1min seg · 3d /
+          10GB</span> | UGV Cam 1 — 전체화면</span>
+      <div class="topbar-btns">
+        <button class="topbar-btn" onclick="showPop('pop-settings')">⚙️</button>
+        <button class="topbar-btn" onclick="showLogout()">🚪</button>
+      </div>
+    </div>
+    <div class="main-body">
+      <div class="sidebar">
+        <div class="sb-tabs">
+          <div class="sb-tab on">채널</div>
+          <div class="sb-tab off" onclick="goTo('s-pb')">이전영상</div>
+        </div>
+        <div class="ch-tree">
+          <div class="tree-group">📷 CCTV</div>
+          <div class="tree-item disc">ㄴ Channel 1 <span>🔴</span></div>
+          <div class="tree-item" ondblclick="goTo('s-cctv')">ㄴ Channel 2 <span>🟢</span></div>
+          <div class="tree-item" ondblclick="goTo('s-cctv')">ㄴ Channel 3 <span>🟢</span></div>
+          <div class="tree-group">🚗 UGV</div>
+          <div class="tree-item sel">ㄴ ▶ Cam 1 <span>🟡</span></div>
+        </div>
+        <div class="sb-ctrl">
+          <div class="back-sb" onclick="goTo('s-main')">← 멀티뷰로 돌아가기</div>
+          <div class="ctrl-lbl" style="margin-top:4px">🎛 Pan/Tilt</div>
+          <div class="ptz-dpad">
+            <div></div><button class="ptz-btn">▲</button>
+            <div></div>
+            <button class="ptz-btn">◀</button><button class="ptz-btn ptz-c">■</button><button class="ptz-btn">▶</button>
+            <div></div><button class="ptz-btn">▼</button>
+            <div></div>
+          </div>
+          <div class="ctrl-lbl">Pan</div>
+          <div class="zoom-row">
+            <div class="slider-t" style="flex:1">
+              <div class="slider-th" style="left:50%"></div>
+            </div>
+            <input type="number" value="0"
+              style="width:36px;height:18px;background:var(--bg);border:1px solid var(--control);border-radius:3px;color:#fff;font-size:9px;text-align:center;padding:0"
+              title="Pan 각도">°
+          </div>
+          <div class="ctrl-lbl">Tilt</div>
+          <div class="zoom-row">
+            <div class="slider-t" style="flex:1">
+              <div class="slider-th" style="left:30%"></div>
+            </div>
+            <input type="number" value="0"
+              style="width:36px;height:18px;background:var(--bg);border:1px solid var(--control);border-radius:3px;color:#fff;font-size:9px;text-align:center;padding:0"
+              title="Tilt 각도">°
+          </div>
+        </div>
+        <div class="sb-bottom">
+          <button class="sb-btn btn-snap" onclick="showToast()">📷 스냅샷</button>
+          <button class="sb-btn btn-clip" id="clip-btn-ugv" onclick="toggleClipForActive()">⏺ 클립</button>
+        </div>
+      </div>
+      <!-- v8: 상/하 1:1 분할 -->
+      <div class="ugv-split">
+        <div class="ugv-video">
+          <div class="ugv-video-inner">
+            <div class="ugv-video-placeholder ar-16x9">UGV 영상 (원본 비율 유지 · letterbox)</div>
+          </div>
+          <div class="ugv-ts">2026-02-19 14:32:10</div>
+          <div class="ugv-rssi">RSSI: -62 dBm ████░░</div>
+          <div id="osd-clip-ugv"
+            style="position:absolute;bottom:8px;left:0;right:0;text-align:center;font-size:10px;color:var(--red);display:none">
+            ⏺ CLIP 00:00:00</div>
+          <div style="position:absolute;bottom:8px;left:12px;font-size:9px;color:var(--yellow)">UGV Cam 1</div>
+        </div>
+        <div class="ugv-map">
+          <div class="ugv-map-lbl">🗺️ 지도 (UGV 위치 + 이동 경로)</div>
+          <div class="ugv-pin">📍</div>
+          <div class="ugv-dpad">
+            <div></div><button class="dp-btn">▲</button>
+            <div></div>
+            <button class="dp-btn">◀</button><button class="dp-btn dp-stop">■</button><button class="dp-btn">▶</button>
+            <div></div><button class="dp-btn">▼</button>
+            <div></div>
+          </div>
+          <button class="ugv-end-btn" onclick="goTo('s-main')">UGV 임무 종료</button>
+        </div>
+      </div>
+      <!-- v9: UGV에서는 이벤트뷰 없음, 스낵바로 알림 -->
+    </div>
+  </div>
+
+  <!-- ⑧ Playback (v8: 파일 노출 없음, 타임라인 탐색) -->
+  <div id="s-pb" class="screen" style="flex-direction:column">
+    <div class="topbar">
+      <span class="topbar-logo">🌲 <span>VMS</span><span class="topbar-status">ARCHIVE: <b>ON</b> · 1min seg · 3d /
+          10GB</span> | Playback — 타임라인 탐색</span>
+      <div class="topbar-btns">
+        <button class="topbar-btn" onclick="showPop('pop-settings')">⚙️</button>
+        <button class="topbar-btn" onclick="showLogout()">🚪</button>
+      </div>
+    </div>
+    <div class="main-body">
+      <div class="sidebar">
+        <div class="sb-tabs">
+          <div class="sb-tab off" onclick="goTo('s-main')">채널</div>
+          <div class="sb-tab on">이전영상</div>
+        </div>
+        <!-- v8: 파일 직접 노출 없음 - 날짜/채널 선택 후 타임라인 탐색 -->
+        <div class="file-tree">
+          <div class="ft-date">📅 2026-02-19</div>
+          <div class="tree-group" style="font-size:10px;padding:2px 18px;color:var(--text-light)">📷 CCTV</div>
+          <div class="ft-ch sel" onclick="selectCh(this,'Channel 1')">Channel 1 ◀ 선택됨</div>
+          <div class="ft-ch" onclick="selectCh(this,'Channel 2')">Channel 2</div>
+          <div class="ft-note">※ 세그먼트는 내부 처리</div>
+          <div class="tree-group" style="font-size:10px;padding:2px 18px;color:var(--text-light)">🚗 UGV</div>
+          <div class="ft-ch" onclick="selectCh(this,'UGV Cam 1')">UGV Cam 1</div>
+          <div class="ft-date" style="margin-top:6px">📅 2026-02-18</div>
+          <div class="tree-group" style="font-size:10px;padding:2px 18px;color:var(--text-light)">📷 CCTV</div>
+          <div class="ft-ch" onclick="selectCh(this,'Channel 1')">Channel 1</div>
+          <div class="ft-ch" onclick="selectCh(this,'Channel 2')">Channel 2</div>
+        </div>
+        <div class="sb-bottom">
+          <button class="sb-btn btn-snap" onclick="showToast()">📷 스냅샷</button>
+          <button class="sb-btn btn-clip" id="export-btn-pb" onclick="showExport()">📤 내보내기</button>
+        </div>
+      </div>
+      <div class="pb-area">
+        <div class="pb-video">
+          <div class="pb-ts">2026-02-19 14:30:22 [재생 중]</div>
+          <div class="pb-ch-lbl" id="pb-ch-lbl">Channel 1</div>
+        </div>
+        <div class="pb-timeline-wrap">
+          <div class="pb-top-row">
+            <button class="pb-play">⏸</button>
+            <button class="pb-speed" id="pb-speed-btn" onclick="cycleSpeed()">1x</button>
+            <div class="pb-bar-bg">
+              <div class="pb-bar-fill"></div>
+              <div class="pb-gap" style="left:58%;width:8%"></div>
+              <div class="pb-marker" style="left:15%"></div>
+              <div class="pb-marker" style="left:42%"></div>
+              <div class="pb-marker" style="left:73%"></div>
+            </div>
+            <span class="pb-time" id="pb-time">14:30:22 / 오늘 00:00 ~ 현재</span>
+          </div>
+          <div class="pb-scale">
+            <span>00:00</span><span>03:00</span><span>06:00</span><span>09:00</span>
+            <span>12:00</span><span>15:00</span><span>18:00</span><span>21:00</span><span>24:00</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ 팝업들 ═══ -->
+
+  <!-- 설정 (v8: 백업 저장 경로 제거) -->
+  <div id="pop-settings" class="overlay">
+    <div class="pop-box" style="min-width:460px">
+      <div class="pop-bar"><span class="pop-bar-title">⚙️ 설정</span><button class="pop-close"
+          onclick="hidePop('pop-settings')">✕</button></div>
+      <div class="pop-body">
+        <div class="pop-sec">장치 관리</div>
+        <hr class="pop-hr">
+        <div class="pop-row">
+          <div class="pop-item">🔍 ONVIF Discovery (v1 미연동, 추후 연동)</div>
+        </div>
+        <div class="pop-row">
+          <input class="fi" style="margin:0;flex:1" placeholder="rtsp:// 직접 입력">
+          <button class="btn-sm">추가</button>
+        </div>
+        <div class="pop-sec" style="margin-top:12px">저장 경로</div>
+        <hr class="pop-hr">
+        <div class="pop-path">📷 스냅샷: /home/user/vms/snapshots</div>
+        <div class="pop-path">⏺ 클립 저장(로컬): /home/user/vms/clips</div>
+        <div class="pop-note">※ Archive(백업): 서버 정책(3일/10GB), 클립 저장: 사용자 PC 경로에 별도 저장</div>
+        <div class="pop-sec" style="margin-top:12px">백업 정보</div>
+        <hr class="pop-hr">
+        <div class="pop-note">보관 기간: 3일 / 용량 상한: 10GB</div>
+        <div class="pop-note">용량 초과 시 가장 오래된 날짜부터 자동 삭제</div>
+        <div class="pop-footer"><button class="btn-sm" onclick="hidePop('pop-settings')">저장</button></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 로그아웃 A -->
+  <div id="pop-logout-a" class="overlay">
+    <div class="pop-box">
+      <div class="pop-bar"><span class="pop-bar-title">로그아웃</span><button class="pop-close"
+          onclick="hidePop('pop-logout-a')">✕</button></div>
+      <div class="pop-body">
+        <div class="pop-msg">로그아웃 하시겠습니까?</div>
+        <div class="pop-btns">
+          <button class="btn-danger" onclick="doLogout()">로그아웃</button>
+          <button class="btn-cancel" onclick="hidePop('pop-logout-a')">취소</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 로그아웃 B (클립 저장 중) -->
+  <div id="pop-logout-b" class="overlay">
+    <div class="pop-box">
+      <div class="pop-bar danger"><span class="pop-bar-title">⚠ 로그아웃</span><button class="pop-close"
+          onclick="hidePop('pop-logout-b')">✕</button></div>
+      <div class="pop-body">
+        <div class="pop-msg">로그아웃 하시겠습니까?</div>
+        <div class="pop-warn">⚠ 클립 저장 중입니다. 로그아웃 시 클립 파일이 자동 저장됩니다.<br><small style="color:#888">※ 백업(Archive)은 서버에서 계속
+            동작합니다</small></div>
+        <div class="pop-btns">
+          <button class="btn-danger" onclick="doLogout()">로그아웃</button>
+          <button class="btn-cancel" onclick="hidePop('pop-logout-b')">취소</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- UGV 출동 A -->
+  <div id="pop-ugv-a" class="overlay">
+    <div class="pop-box">
+      <div class="pop-bar"><span class="pop-bar-title">UGV 출동 확인</span><button class="pop-close"
+          onclick="hidePop('pop-ugv-a')">✕</button></div>
+      <div class="pop-body">
+        <div class="pop-msg" style="text-align:left;font-size:11px;line-height:1.8">대상: 연기 감지 / Channel 1<br>시각:
+          2026-02-19 14:30:05</div>
+        <div class="pop-btns">
+          <button class="btn-danger" onclick="doUGV()">출동</button>
+          <button class="btn-cancel" onclick="hidePop('pop-ugv-a')">취소</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- UGV 출동 B (클립 저장 중) -->
+  <div id="pop-ugv-b" class="overlay">
+    <div class="pop-box">
+      <div class="pop-bar"><span class="pop-bar-title">UGV 출동 확인</span><button class="pop-close"
+          onclick="hidePop('pop-ugv-b')">✕</button></div>
+      <div class="pop-body">
+        <div class="pop-msg" style="text-align:left;font-size:11px;line-height:1.8">대상: 연기 감지 / Channel 1<br>시각:
+          2026-02-19 14:30:05</div>
+        <div class="pop-warn">⚠ 클립 저장 중입니다. 출동 시 클립 파일이 자동 저장됩니다.<br><small style="color:#888">※ 백업(Archive)은 서버에서 계속
+            동작합니다</small></div>
+        <div class="pop-btns">
+          <button class="btn-danger" onclick="doUGV()">출동</button>
+          <button class="btn-cancel" onclick="hidePop('pop-ugv-b')">취소</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 이벤트 상세 -->
+  <div id="pop-ev-detail" class="overlay">
+    <div class="pop-box" style="min-width:460px">
+      <div class="pop-bar"><span class="pop-bar-title">이벤트 상세</span><button class="pop-close"
+          onclick="hideAllPops()">✕</button></div>
+      <div class="pop-body">
+        <div class="pop-img">[사진 16:9]</div>
+        <div class="pop-info">날짜: 2026-02-19 12:10:05<br>채널: Channel 2<br>이벤트: 움직임 감지<br>위치: 37.51°N 127.05°E</div>
+        <div class="pop-btns" style="flex-direction:column;gap:6px">
+          <button id="ev-detail-ugv-btn" class="btn-danger" onclick="hidePop('pop-ev-detail');showUGV()">🚗 UGV 출동</button>
+          <button class="btn-cancel" onclick="closeEvDetail()">닫기</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 이벤트 검색 -->
+  <div id="pop-search" class="overlay">
+    <div class="pop-box">
+      <div class="pop-bar"><span class="pop-bar-title">🔍 이벤트 검색</span><button class="pop-close"
+          onclick="hidePop('pop-search')">✕</button></div>
+      <div class="s-body">
+        <div>
+          <div class="s-lbl">📅 날짜</div>
+          <div class="s-date-row">
+            <input class="s-di" value="2026-02-01" placeholder="시작일">
+            <span style="color:var(--text-sec)">~</span>
+            <input class="s-di" value="2026-02-23" placeholder="종료일">
+          </div>
+        </div>
+        <hr class="s-div">
+        <div>
+          <div class="s-lbl">⚡ 이벤트 종류</div>
+          <div class="s-checks">
+            <div class="s-ck on" onclick="this.classList.toggle('on')">연기 감지</div>
+            <div class="s-ck on" onclick="this.classList.toggle('on')">움직임 감지</div>
+            <div class="s-ck" onclick="this.classList.toggle('on')">침입 감지</div>
+          </div>
+        </div>
+        <hr class="s-div">
+        <div>
+          <div class="s-lbl">📷 채널</div>
+          <div class="s-checks">
+            <div class="s-ck on" onclick="this.classList.toggle('on')">Channel 1</div>
+            <div class="s-ck on" onclick="this.classList.toggle('on')">Channel 2</div>
+            <div class="s-ck" onclick="this.classList.toggle('on')">Channel 3</div>
+            <div class="s-ck on" onclick="this.classList.toggle('on')">🚗 UGV Cam 1</div>
+          </div>
+        </div>
+        <button class="s-btn">검색</button>
+        <div class="s-results">
+          <div class="s-r-hdr">검색 결과 <span>3</span>건 &nbsp;<span style="color:var(--text-sec);font-weight:400">클릭 →
+              상세</span></div>
+          <div class="s-r-list">
+            <div class="s-r-item" onclick="openEvDetailFromSearch()">
+              <span class="s-tag tag-s">연기 감지</span>
+              <div class="s-r-info">
+                <div class="s-r-main">Channel 1</div>
+                <div class="s-r-sub">2026-02-19 14:30:05</div>
+              </div>
+            </div>
+            <div class="s-r-item" onclick="openEvDetailFromSearch()">
+              <span class="s-tag tag-m">움직임 감지</span>
+              <div class="s-r-info">
+                <div class="s-r-main">Channel 2</div>
+                <div class="s-r-sub">2026-02-18 09:12:33</div>
+              </div>
+            </div>
+            <div class="s-r-item" onclick="openEvDetailFromSearch()">
+              <span class="s-tag tag-s">연기 감지</span>
+              <div class="s-r-info">
+                <div class="s-r-main">UGV Cam 1</div>
+                <div class="s-r-sub">2026-02-17 21:45:10</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- Playback 내보내기(클립) 팝업 -->
+  <div id="pop-export" class="overlay">
+    <div class="pop-box" style="min-width:520px">
+      <div class="pop-bar"><span class="pop-bar-title">📤 내보내기(클립)</span><button class="pop-close"
+          onclick="hidePop('pop-export')">✕</button></div>
+      <div class="pop-body">
+        <div class="pop-sec">대상</div>
+        <hr class="pop-hr">
+        <div class="pop-note" id="export-target">Channel 1 · 2026-02-19</div>
+        <div class="pop-sec" style="margin-top:10px">구간</div>
+        <hr class="pop-hr">
+        <div class="pop-row">
+          <div class="pop-item" style="flex:1">시작</div>
+          <input class="fi" id="export-from" style="margin:0;flex:2;background:#f5f5f5;color:#333"
+            placeholder="HH:MM:SS" value="14:30:00">
+        </div>
+        <div class="pop-row">
+          <div class="pop-item" style="flex:1">끝</div>
+          <input class="fi" id="export-to" style="margin:0;flex:2;background:#f5f5f5;color:#333" placeholder="HH:MM:SS"
+            value="14:31:00">
+        </div>
+        <div class="pop-note">※ v1: 서버 백업 세그먼트를 이용해 지정 구간을 MP4로 내보내는 UX(프로토타입)</div>
+        <div class="pop-btns" style="margin-top:12px">
+          <button class="btn-danger" onclick="doExport()">내보내기</button>
+          <button class="btn-cancel" onclick="hidePop('pop-export')">취소</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- 스낵바 (Playback 이벤트 - 우측 하단) -->
+  <div class="snackbar" id="snackbar">
+    <span id="snackbar-msg">연기 감지 — Ch1</span>
+    <button class="snackbar-close" onclick="hideSnack()">✕</button>
+  </div>
+
+  <!-- 토스트 -->
+  <div class="toast" id="toast">저장됨 ✓</div>
+
+  <script>
+    /* =========================
+   v9 Prototype
+   - 화면 캡처 방식 클립 (중앙 영상 영역 전체)
+   - Playback: 내보내기 + 배속
+   - 백업 3일/10GB
+   - UGV 비율 변경 제거
+   ========================= */
+
+    let draggedCh = '';
+
+    /** 멀티뷰 셀에 할당된 채널(초기값) */
+    const cellChannels = [
+      'Channel 2',
+      'Channel 3',
+      'UGV Cam 1',
+      'Channel 1',
+      null, null, null, null, null
+    ];
+
+    let activeCell = 0;
+    let activeChannel = cellChannels[0];
+
+    /** Playback 선택 채널 */
+    let pbSelectedChannel = 'Channel 1';
+
+    /** 채널별 클립 상태 → v9: 단일 클립 상태 (화면 캡처) */
+    let clipOn = false;
+    let clipStartMs = 0;
+    let clipTick = null;
+
+    /** 이벤트 스낵바 */
+    let snackCount = 0;
+    let snackHideTimer = null;
+
+    /** Playback 배속 */
+    const speeds = [0.5, 1, 2, 4, 8];
+    let speedIdx = 1;
+
+    /* -------- 화면 전환 -------- */
+    function goTo(id) {
+      document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+      document.getElementById(id).classList.add('active');
+
+      // v9: 화면 전환 시 스낵바 자동 제거
+      hideSnack();
+
+      // 화면별 "활성 채널" 기본값
+      if (id === 's-main') {
+        // 유지
+      } else if (id === 's-cctv') {
+        activeChannel = 'Channel 2';
+      } else if (id === 's-ugv') {
+        activeChannel = 'UGV Cam 1';
+        // UGV/Playback에서 이벤트 데모 스낵바
+        setTimeout(() => showSnack('연기 감지 — Ch1'), 1200);
+      } else if (id === 's-pb') {
+        setTimeout(() => showSnack('연기 감지 — Ch1'), 1200);
+      }
+
+      refreshActiveCellUI();
+      refreshClipUI();
+    }
+
+    /* -------- 로그인 -------- */
+    function doLogin() {
+      const id = document.getElementById('lid').value;
+      const pw = document.getElementById('lpw').value;
+      const err = document.getElementById('lerr');
+      if ((id === 'admin' && pw === '1234') || (id === '' && pw === '')) {
+        err.style.display = 'none'; goTo('s-device');
+      } else { err.style.display = 'block'; }
+    }
+
+    /* -------- 팝업 -------- */
+    function showPop(id) {
+      document.getElementById(id).classList.add('show');
+      evDetailFromSearch = false;
+      // 이벤트뷰에서 열면 UGV 출동 버튼 표시
+      if (id === 'pop-ev-detail') {
+        document.getElementById('ev-detail-ugv-btn').style.display = '';
+      }
+    }
+    function hidePop(id) { document.getElementById(id).classList.remove('show'); }
+    function hideAllPops() { document.querySelectorAll('.overlay').forEach(o => o.classList.remove('show')); evDetailFromSearch = false; }
+
+    /* -------- 이벤트 상세: 검색에서 열렸을 때 닫기 → 검색 복귀 -------- */
+    let evDetailFromSearch = false;
+    function openEvDetailFromSearch() {
+      hidePop('pop-search');
+      evDetailFromSearch = true;
+      // 검색(과거 이벤트)에서 열면 UGV 출동 버튼 숨김
+      document.getElementById('ev-detail-ugv-btn').style.display = 'none';
+      document.getElementById('pop-ev-detail').classList.add('show');
+    }
+    function closeEvDetail() {
+      hidePop('pop-ev-detail');
+      if (evDetailFromSearch) {
+        evDetailFromSearch = false;
+        showPop('pop-search');
+      }
+    }
+
+    /* -------- 클립: 상태/제어 (v9: 단일 화면캡처) -------- */
+    function formatDur(sec) {
+      const h = Math.floor(sec / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      const s = sec % 60;
+      return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    }
+    function clipElapsed() {
+      if (!clipOn) return 0;
+      return Math.max(0, Math.floor((Date.now() - clipStartMs) / 1000));
+    }
+
+    function toggleClipForActive() {
+      if (!clipOn) {
+        // start
+        clipOn = true;
+        clipStartMs = Date.now();
+        showToast('클립 저장 시작 (화면 캡처)', 'info');
+      } else {
+        // stop
+        clipOn = false;
+        const dur = formatDur(clipElapsed());
+        showToast(`클립 저장 완료 (${dur})`, 'info');
+      }
+      ensureClipTick();
+      refreshClipUI();
+    }
+
+    function stopAllClips(reason = '자동 저장') {
+      if (clipOn) {
+        clipOn = false;
+        ensureClipTick();
+        refreshClipUI();
+        showToast(`클립 ${reason} 완료`, 'info');
+      }
+    }
+
+    function ensureClipTick() {
+      if (clipOn && !clipTick) {
+        clipTick = setInterval(() => {
+          refreshClipUI(true);
+        }, 1000);
+      }
+      if (!clipOn && clipTick) {
+        clearInterval(clipTick);
+        clipTick = null;
+      }
+    }
+
+    /* -------- 클립: UI 반영 (v9: 단일 화면캡처) -------- */
+    function setClipBtn(btnId) {
+      const btn = document.getElementById(btnId);
+      if (!btn) return;
+      if (btnId === 'export-btn-pb') {
+        // Playback은 항상 내보내기
+        btn.textContent = '📤 내보내기';
+        return;
+      }
+      btn.textContent = clipOn ? '⏹ 저장중지' : '⏺ 클립';
+      btn.classList.toggle('recording', clipOn);
+    }
+
+    function refreshClipUI(isTick = false) {
+      // 버튼 텍스트 동기화
+      setClipBtn('clip-btn-main');
+      setClipBtn('clip-btn-cctv');
+      setClipBtn('clip-btn-ugv');
+
+      // 멀티뷰: 클립 저장 중이면 전체에 표시
+      for (let i = 0; i < 9; i++) {
+        const cell = document.getElementById(`cell-${i}`);
+        if (!cell) continue;
+        const old = cell.querySelector('.c-clip');
+        if (old) old.remove();
+      }
+      // 클립 OSD on first cell only (전체 캡처 표시)
+      if (clipOn) {
+        const cell = document.getElementById('cell-0');
+        if (cell) {
+          const t = document.createElement('div');
+          t.className = 'c-clip';
+          t.textContent = `⏺ CLIP ${formatDur(clipElapsed())}`;
+          cell.appendChild(t);
+        }
+      }
+
+      // CCTV 전체화면 OSD
+      const cctv = document.getElementById('osd-clip-cctv');
+      if (cctv) {
+        cctv.style.display = clipOn ? 'block' : 'none';
+        if (clipOn) cctv.textContent = `⏺ CLIP ${formatDur(clipElapsed())}`;
+      }
+
+      // UGV 전체화면 OSD
+      const ugv = document.getElementById('osd-clip-ugv');
+      if (ugv) {
+        ugv.style.display = clipOn ? 'block' : 'none';
+        if (clipOn) ugv.textContent = `⏺ CLIP ${formatDur(clipElapsed())}`;
+      }
+    }
+
+    /* -------- 로그아웃/UGV 출동 -------- */
+    function showLogout() {
+      hideAllPops();
+      showPop(clipOn ? 'pop-logout-b' : 'pop-logout-a');
+    }
+    function showUGV() {
+      hideAllPops();
+      showPop(clipOn ? 'pop-ugv-b' : 'pop-ugv-a');
+    }
+    function doLogout() {
+      hideAllPops();
+      if (clipOn) stopAllClips('자동 저장');
+      goTo('s-login');
+    }
+    function doUGV() {
+      hideAllPops();
+      if (clipOn) stopAllClips('자동 저장');
+      goTo('s-ugv');
+    }
+
+    /* -------- 멀티뷰: 레이아웃/셀 -------- */
+    function setLayout(n) {
+      const g = document.getElementById('grid-main');
+      g.className = `grid-v g${n}`;
+      document.querySelectorAll('.lay-btn').forEach(b => b.classList.toggle('on', b.textContent == n));
+
+      // v9: 초과 셀 제거 (큰 레이아웃 → 작은 레이아웃 전환 시)
+      const allCells = g.querySelectorAll('.vcell');
+      allCells.forEach(cell => {
+        const idx = parseInt(cell.id.replace('cell-', ''));
+        if (idx >= n) {
+          cell.remove();
+          cellChannels[idx] = null;
+        }
+      });
+
+      // v9: 부족한 셀 추가 (동적 생성)
+      for (let i = 0; i < n; i++) {
+        if (!document.getElementById(`cell-${i}`)) {
+          const cell = document.createElement('div');
+          cell.className = 'vcell';
+          cell.id = `cell-${i}`;
+          cell.innerHTML = `<div class="cell-empty-txt">빈 채널 (드래그앤드롭으로 추가)</div>`;
+          cell.onclick = () => selectCell(i);
+          cell.ondragover = ev => ev.preventDefault();
+          cell.ondrop = ev => dropCh(ev, i);
+          g.appendChild(cell);
+          if (!cellChannels[i]) cellChannels[i] = null;
+        }
+      }
+    }
+
+    function selectCell(idx) {
+      activeCell = idx;
+      activeChannel = cellChannels[idx];
+      refreshActiveCellUI();
+      refreshClipUI();
+    }
+
+    function refreshActiveCellUI() {
+      for (let i = 0; i < 9; i++) {
+        const cell = document.getElementById(`cell-${i}`);
+        if (!cell) continue;
+        cell.classList.toggle('active', i === activeCell);
+      }
+    }
+
+    function clearCell(e, idx) {
+      e.stopPropagation();
+      const cell = document.getElementById(`cell-${idx}`);
+      cellChannels[idx] = null;
+      cell.innerHTML = `<div class="cell-empty-txt">빈 채널 (드래그앤드롭으로 추가)</div>`;
+      cell.className = 'vcell';
+      cell.onclick = () => selectCell(idx);
+      cell.ondblclick = null;
+      cell.ondragover = ev => ev.preventDefault();
+      cell.ondrop = ev => dropCh(ev, idx);
+      refreshActiveCellUI();
+      refreshClipUI();
+    }
+
+    function dragCh(e, ch) { draggedCh = ch; }
+    function dropCh(e, idx) {
+      e.preventDefault();
+      if (!draggedCh) return;
+      const cell = document.getElementById(`cell-${idx}`);
+      const isUGV = draggedCh.includes('UGV');
+      cellChannels[idx] = draggedCh;
+
+      cell.className = 'vcell';
+      cell.innerHTML = `
+    <div class="c-ts${isUGV ? ' ugv' : ''}">${new Date().toLocaleString('sv').replace('T', ' ')}</div>
+    <div class="c-st">${isUGV ? '🟡' : '🟢'}</div>
+    <div class="c-ch${isUGV ? ' ugv' : ''}">${draggedCh}</div>
+    <button class="cx" onclick="clearCell(event,${idx})">✕</button>`;
+      cell.onclick = () => selectCell(idx);
+      cell.ondblclick = () => goTo(isUGV ? 's-ugv' : 's-cctv');
+      cell.ondragover = ev => ev.preventDefault();
+      cell.ondrop = ev => dropCh(ev, idx);
+      draggedCh = '';
+
+      // 드롭 직후 활성 셀로 지정
+      selectCell(idx);
+    }
+
+    /* -------- Playback -------- */
+    function selectCh(el, ch) {
+      document.querySelectorAll('.ft-ch').forEach(c => {
+        c.classList.remove('sel');
+        c.textContent = c.textContent.replace(' ◀ 선택됨', '');
+      });
+      el.classList.add('sel');
+      el.textContent = ch + ' ◀ 선택됨';
+      document.getElementById('pb-ch-lbl').textContent = ch;
+      pbSelectedChannel = ch;
+    }
+
+    function showExport() {
+      // Playback 화면에서만 사용
+      hideAllPops();
+      // 대상 라벨 갱신
+      const target = document.getElementById('export-target');
+      if (target) target.textContent = `${pbSelectedChannel} · 2026-02-19`;
+      showPop('pop-export');
+    }
+
+    function doExport() {
+      const from = document.getElementById('export-from')?.value || '';
+      const to = document.getElementById('export-to')?.value || '';
+      hidePop('pop-export');
+      showToast(`내보내기 요청 완료: ${pbSelectedChannel} (${from}~${to})`, 'info');
+    }
+
+    /* -------- 알림/토스트 -------- */
+    function showToast(msg = '저장됨 ✓', type = 'info') {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.classList.toggle('err', type === 'err');
+      t.classList.toggle('info', type === 'info');
+      t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), 2200);
+    }
+
+    function showSnack(msg) {
+      snackCount++;
+      const sb = document.getElementById('snackbar');
+      document.getElementById('snackbar-msg').textContent =
+        snackCount >= 3 ? `이벤트 ${snackCount}건 발생` : msg;
+      sb.classList.add('show');
+
+      if (snackHideTimer) clearTimeout(snackHideTimer);
+      snackHideTimer = setTimeout(() => {
+        hideSnack();
+      }, 6000);
+    }
+    function hideSnack() {
+      document.getElementById('snackbar').classList.remove('show');
+      snackCount = 0;
+      if (snackHideTimer) clearTimeout(snackHideTimer);
+      snackHideTimer = null;
+    }
+
+    /* -------- Playback 배속 -------- */
+    function cycleSpeed() {
+      speedIdx = (speedIdx + 1) % speeds.length;
+      const rate = speeds[speedIdx];
+      const label = rate < 1 ? `${rate}x` : `${rate}x`;
+      document.getElementById('pb-speed-btn').textContent = label;
+      showToast(`재생 속도: ${label}`, 'info');
+    }
+
+    /* -------- 초기화 -------- */
+    refreshActiveCellUI();
+    ensureClipTick();
+    refreshClipUI();
+
+    // 오버레이 바깥 클릭 닫기
+    document.querySelectorAll('.overlay').forEach(o => {
+      o.addEventListener('click', e => { if (e.target === o) o.classList.remove('show'); });
+    });
+  </script>
+</body>
+
+</html>
