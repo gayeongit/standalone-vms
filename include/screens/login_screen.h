@@ -48,6 +48,7 @@ public:
 signals:
     void loginRequested(const QString &username, const QString &password);
     void signupRequested();
+    void guestRequested();
 
 private:
     QLineEdit *m_idEdit = nullptr;
@@ -55,6 +56,7 @@ private:
     QLabel *m_statusLabel = nullptr;
     QPushButton *m_loginButton = nullptr;
     QPushButton *m_signupButton = nullptr;
+    QPushButton *m_guestButton = nullptr;
 };
 
 class SignupScreen : public QWidget

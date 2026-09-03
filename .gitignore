@@ -91,3 +91,6 @@ compile_commands.json
 
 # Local server workspace
 /docs_v1/
+
+# Environment-specific config (contains real server IP/paths)
+/app_config.json

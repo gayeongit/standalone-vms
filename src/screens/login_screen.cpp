@@ -1,7 +1,6 @@
 #include "login_screen.h"
 #include "common_ui.h"
 #include "device_service.h"
-#include "popup_manager.h"
 
 #include <QCheckBox>
 #include <QFrame>
@@ -191,6 +190,10 @@ LoginScreen::LoginScreen(QWidget *parent)
     m_signupButton->setObjectName("authSecondaryButton");
     m_signupButton->setFixedHeight(38);
 
+    m_guestButton = new QPushButton("게스트로 시작", this);
+    m_guestButton->setObjectName("authSecondaryButton");
+    m_guestButton->setFixedHeight(38);
+
     m_statusLabel = new QLabel(this);
     m_statusLabel->setObjectName("authStatusLabel");
     m_statusLabel->setWordWrap(true);
@@ -214,6 +217,8 @@ LoginScreen::LoginScreen(QWidget *parent)
     formLayout->addWidget(divider);
     formLayout->addSpacing(8);
     formLayout->addWidget(m_signupButton);
+    formLayout->addSpacing(8);
+    formLayout->addWidget(m_guestButton);
 
     layout->addStretch(1);
     layout->addSpacing(6);
@@ -238,6 +243,7 @@ LoginScreen::LoginScreen(QWidget *parent)
         emit loginRequested(username, password);
     });
     connect(m_signupButton, &QPushButton::clicked, this, &LoginScreen::signupRequested);
+    connect(m_guestButton, &QPushButton::clicked, this, &LoginScreen::guestRequested);
     connect(m_idEdit, &QLineEdit::returnPressed, m_loginButton, &QPushButton::click);
     connect(m_pwEdit, &QLineEdit::returnPressed, m_loginButton, &QPushButton::click);
 }
@@ -250,6 +256,9 @@ void LoginScreen::setLoginInProgress(bool inProgress)
     }
     if (m_signupButton) {
         m_signupButton->setEnabled(!inProgress);
+    }
+    if (m_guestButton) {
+        m_guestButton->setEnabled(!inProgress);
     }
 }
 
@@ -561,12 +570,8 @@ DeviceCheckScreen::DeviceCheckScreen(QWidget *parent)
         reloadDevices();
     });
     connect(m_startButton, &QPushButton::clicked, this, [this]() {
-        const auto selected = selectedContexts();
-        if (selected.isEmpty()) {
-            PopupManager::showInfo(this, "장치 탐색", "장치 미선택 시 VMS에 진입할 수 없습니다.");
-            return;
-        }
-        emit startRequested(selected);
+        // 채널 0개(카메라 미연결/게스트)로도 VMS 시작을 허용한다 — Phase 3a.
+        emit startRequested(selectedContexts());
     });
     auto connectTreeToggle = [this](QTreeWidget *tree) {
         connect(tree, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem *item, int column) {

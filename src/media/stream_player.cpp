@@ -862,7 +862,7 @@ QVector<QPointer<VideoRenderWidget>> StreamPlayer::snapshotRenderTargets() const
     return out;
 }
 
-void StreamPlayer::publishSampleFrame(GstSample *sample)
+void StreamPlayer::publishSampleFrame(struct _GstSample *sample)
 {
 #if defined(VMS_WITH_GSTREAMER) && VMS_WITH_GSTREAMER
     if (!sample) {

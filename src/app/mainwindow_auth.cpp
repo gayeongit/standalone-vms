@@ -85,6 +85,20 @@ void MainWindow::setupConnections()
             }
         });
     });
+    connect(m_loginScreen, &LoginScreen::guestRequested, this, [this]() {
+        // 게스트 진입: AuthService::login(...)을 호출하지 않으므로 AppState.isAuthenticated는
+        // false로 유지된다. 카메라 데이터는 로그인 여부와 무관하게 항상 직접 받는다는
+        // 설계 원칙(로드맵 2.3)에 따라, 로그인 성공 경로와 동일하게 DeviceCheck로 전환하고
+        // 채널 조회를 시도한다.
+        showScreen(ScreenId::DeviceCheck);
+        if (m_deviceScreen) {
+            QTimer::singleShot(300, m_deviceScreen, [this]() {
+                if (m_deviceScreen) {
+                    m_deviceScreen->refreshDevices();
+                }
+            });
+        }
+    });
     connect(m_loginScreen, &LoginScreen::signupRequested, this, [this]() {
         if (m_loginScreen) {
             m_loginScreen->resetLoginInputs();
@@ -140,11 +154,9 @@ void MainWindow::setupConnections()
             PopupManager::showInfo(this, "장치 탐색", "DeviceService 미연결 상태입니다.");
             return;
         }
+        // 채널 0개(카메라 미연결/게스트)도 정상 입력이다 — Phase 3a.
+        // normalized가 비어 있으면 아래 pending 루프가 그냥 0회 돌고 finalize()가 즉시 호출된다.
         auto normalized = normalizeSelectedContextsForRuntime(selectedContexts);
-        if (normalized.isEmpty()) {
-            PopupManager::showInfo(this, "장치 탐색", "선택된 채널이 없습니다.");
-            return;
-        }
 
         m_deviceScreen->setEnabled(false);
         auto pending = QSharedPointer<int>::create(0);
@@ -189,11 +201,15 @@ void MainWindow::setupConnections()
 
             if (resolvedContexts.isEmpty()) {
                 state.selectedChannelContexts.clear();
-                PopupManager::showInfo(this, "장치 탐색", "채널 RTSP 조회에 실패했습니다. 잠시 후 다시 시도해 주세요.");
-                if (m_deviceScreen) {
-                    m_deviceScreen->setEnabled(true);
+                if (!normalized.isEmpty()) {
+                    // 채널을 선택했는데 RTSP 조회가 전부 실패한 경우에만 진입을 막는다.
+                    // 애초에 0개 선택(게스트/카메라 없음)은 아래로 흘러 Main까지 정상 진입해야 한다.
+                    PopupManager::showInfo(this, "장치 탐색", "채널 RTSP 조회에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+                    if (m_deviceScreen) {
+                        m_deviceScreen->setEnabled(true);
+                    }
+                    return;
                 }
-                return;
             }
 
             state.selectedChannelContexts = resolvedContexts;
