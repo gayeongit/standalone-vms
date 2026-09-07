@@ -94,3 +94,10 @@ compile_commands.json
 
 # Environment-specific config (contains real server IP/paths)
 /app_config.json
+
+# Phase 0 목업 카메라 호스트 — 서드파티 바이너리/빌드 산출물/생성물은 제외, 소스(.cpp/CMakeLists.txt/mediamtx.yml)만 추적
+/mock_camera_host/build/
+/mock_camera_host/ffmpeg/
+/mock_camera_host/mediamtx/*
+!/mock_camera_host/mediamtx/mediamtx.yml
+/mock_camera_host/sample_media/

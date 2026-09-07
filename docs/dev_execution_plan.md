@@ -26,7 +26,7 @@
 
 ## Phase 3a. 로그인/게스트 분기 (카메라 무관)
 
-RPi를 아직 쓸 수 없어서 원래 순서(Phase 0부터)를 못 밟는 상황이라, 카메라 의존이 없는 이 작업을 먼저 진행한다. 배경은 `docs/roadmap.md`의 "3.5 진행 순서 변경" 참고.
+RPi를 아직 쓸 수 없어서 원래 순서(Phase 0부터)를 못 밟는 상황이라, 카메라 의존이 없는 이 작업을 먼저 진행했다. 배경은 `docs/roadmap.md`의 "3.5 진행 순서 변경" 참고.
 
 ### 대상 (코드 조사로 확정)
 
@@ -69,7 +69,75 @@ RPi를 아직 쓸 수 없어서 원래 순서(Phase 0부터)를 못 밟는 상�
 
 ---
 
+## Phase 진입 전 결정: RPi 제약 해결 (2026-09-06)
+
+Phase 0부터는 실제 카메라 역할을 하는 대상(원래 계획은 RPi)이 필요한데, 라즈베리파이를 자유롭게 못 쓰는 상황이 계속됨. 검토 결과 로컬 PC에서 mediamtx + Flask + UDP 브로드캐스트 스크립트를 일반 프로세스로 띄우는 방식으로 대체하기로 결정. 클라우드는 WS-Discovery/이벤트 broadcast가 전제하는 "같은 로컬 네트워크"를 만들 수 없어 기각, 로컬 Docker는 Windows에서 UDP 브로드캐스트/멀티캐스트가 실제 LAN과 다르게 동작할 수 있어 보류. 상세 검토 내용은 `docs/roadmap.md`의 "3.6 RPi 제약 해결" 절 참고.
+
+이 결정으로 Phase 0/1/2/4/5가 더 이상 하드웨어를 기다릴 필요 없이 바로 진행 가능해짐. 아래 Phase 0부터 순서대로 세부 계획을 이어서 작성한다.
+
+---
+
+## Phase 0. 목업 카메라 호스트 구축 (로컬 PC)
+
+배경은 `docs/roadmap.md` 3.6절 참고 — RPi 대신 로컬 PC에서 일반 프로세스로 카메라 역할을 대체한다.
+
+### 언어/스택 결정 (2026-09-08)
+
+- 목업 호스트 3개 컴포넌트(ONVIF-lite mock, CGI mock, UDP 이벤트 브로드캐스터)는 **C++/Qt**(`QTcpServer`/`QUdpSocket`)로 작성한다.
+- 이유: 이 머신엔 이미 이 레포 빌드용 툴체인(CMake + MSVC + Ninja + Qt 6.8.3 msvc2022_64)이 검증되어 있음. 확인해보니 Python은 실제 설치 없이 Windows 스토어 스텁만 있는 상태였고 Node.js도 없어서, 둘 다 쓰려면 새 런타임 설치 비용이 붙음. Qt는 이미 알고 있는 언어/툴체인이라 마찰이 가장 적음.
+- `mediamtx`는 언어 무관 독립 Go 바이너리이므로 그대로 사용 (RTSP 송출만 담당). 다만 mediamtx 자체는 파일을 직접 loop 재생하지 않으므로, `runOnInit`으로 **ffmpeg**를 띄워 샘플 영상을 loop push하는 방식이 필요함 — ffmpeg는 스크립팅 런타임이 아니라 단일 바이너리 데이터 플레인 도구라 설치 비용이 낮음 (Windows 정적 빌드 다운로드만 하면 됨).
+- 목업 호스트는 VMS_v2 앱 코드와 완전히 분리 (별도 디렉토리 + 별도 `CMakeLists.txt`). 기존 화면/미디어/서비스 계층은 이 Phase에서 전혀 건드리지 않음.
+
+### 파일 배치 (예상)
+
+레포 루트에 `mock_camera_host/` 신설:
+
+- `CMakeLists.txt` — 독립 빌드, `Qt6::Core` `Qt6::Network`만 링크 (Widgets/OpenGL 등 불필요)
+- `onvif_mock.cpp` — WS-Discovery(UDP multicast `239.255.255.250:3702`) Probe 응답 + 최소 SOAP(`GetDeviceInformation`/`GetProfiles`/`GetStreamUri`), `QTcpServer`로 HTTP POST 처리
+- `cgi_mock.cpp` — zoom/focus/PTZ HTTP 엔드포인트, OK 응답만 (`QTcpServer`)
+- `event_broadcaster.cpp` — 더미 이벤트 UDP broadcast 송신 (`QUdpSocket` + `QTimer`로 주기 전송)
+- `mediamtx.yml` — RTSP 송출 설정 (`runOnInit`에 ffmpeg loop push 명령 등록)
+- `sample_media/` — 루프 재생용 샘플 영상 파일 (직접 준비)
+- `README.md` — 실행 방법, 포트 목록
+
+### 포트 계획 (기본값, 필요 시 조정)
+
+- ONVIF-lite mock: WS-Discovery UDP `3702` (표준), 디바이스 서비스 HTTP TCP `8082`
+- CGI mock: HTTP TCP `8081`
+- mediamtx: RTSP TCP `8554` (기본값)
+- 이벤트 브로드캐스터: UDP `9998`
+
+### 작업 순서
+
+1. [x] mediamtx Windows 바이너리를 `mock_camera_host/mediamtx/`에 배치, ffmpeg는 `mock_camera_host/ffmpeg/`에 배치 (bin 하위 없이 exe 3개 직접). `mediamtx.yml`의 `paths.cam1.runOnInit`에서 `../ffmpeg/ffmpeg.exe ... ../sample_media/sample_video.mp4`로 loop push. **경로 구분자는 `/`를 써야 함** — mediamtx의 `runOnInit` 파서가 `\`를 이스케이프 문자로 먹어버려 `\`를 쓰면 `..\ffmpeg\ffmpeg.exe`가 `..ffmpegffmpeg.exe`로 깨짐. 사용자가 직접 ffplay/ffprobe로 재생 확인 완료 (2026-09-08)
+2. [x] `mock_camera_host/CMakeLists.txt` 작성 — 독립 프로젝트, `Qt6::Core`/`Qt6::Network`만 링크. `find_package(Qt6 ...)`가 기본 경로에서 안 잡혀서 `-DCMAKE_PREFIX_PATH=C:/Qt/6.8.3/msvc2022_64`를 명시해야 configure 통과함. 3개 타깃(event_broadcaster/cgi_mock/onvif_mock) 전부 빌드 성공 (exit code 0)
+3. [x] `event_broadcaster.cpp` — `QUdpSocket`으로 5초 주기 UDP broadcast(`255.255.255.255:9998`), 더미 이벤트 3종(MOTION_DETECTED/MOTION_CLEARED/LINE_CROSSING) 순환 전송. 페이로드는 JSON(`deviceId`/`channelId`/`channelName`/`eventType`/`timestamp`) — Phase 4 착수 시 `LocalEventListener`가 실제로 뭘 기대하는지 보고 다시 조율
+4. [x] `cgi_mock.cpp` — `QTcpServer` 기반 최소 HTTP 서버(포트 8081), `POST /channel/{channelId}/zoom|focus`만 매칭해 항상 `{"data":{"result":"OK"}}` 응답. 실제 `CctvControlService::requestControl(...)`이 보내는 요청/응답 포맷(`src/services/cctv_control_service.cpp`) 확인 후 맞춤
+5. [x] (부분) `onvif_mock.cpp` — WS-Discovery(UDP 3702, multicast `239.255.255.250`) Probe → ProbeMatch 응답은 표준 스펙대로 실제 구현(고정 XAddrs `http://127.0.0.1:8082/onvif/device_service`). 디바이스 서비스 SOAP 본문(`GetDeviceInformation`/`GetProfiles`/`GetStreamUri`)은 계획대로 **placeholder로 남김** — 어떤 SOAP action이 왔는지 로그만 찍고 TODO 주석 응답 반환. 실제 필드는 Phase 1의 `OnvifLiteClient` 파서와 맞춰서 확정
+
+컴파일까지는 확인됐고(`cmake --build` exit code 0), 아래 게이트 테스트(Wireshark/curl/Wireshark로 broadcast 확인 등 실제 네트워크 동작 검증)는 사용자가 직접 진행.
+
+### 완료 기준
+
+- [x] 4개 컴포넌트(ONVIF-lite mock, CGI mock, mediamtx+ffmpeg, 이벤트 브로드캐스터)가 빌드/배치 완료 — onvif_mock의 디바이스 서비스 응답은 의도적으로 placeholder
+- VMS 코드는 이 Phase에서 아직 연결하지 않음 (Phase 1에서 `DeviceService`에 연결)
+
+### 게이트 테스트
+
+모두 같은 PC(로컬 loopback) 기준으로 진행. 별도 기기로 분리한 테스트는 아직 안 함 (아래 참고).
+
+- [x] **mediamtx RTSP 스트림 재생 확인** — `ffplay.exe rtsp://127.0.0.1:8554/cam1`로 `sample_video.mp4` loop 재생 확인 (사용자 확인, 2026-09-08)
+- [x] **UDP 이벤트 브로드캐스트 패킷이 실제 전송됨** — `event_broadcaster.exe` 실행 후, 별도 터미널에서 PowerShell `UdpClient(9998)` 리스너로 5초 주기 JSON 페이로드(`{"channelId":...,"eventType":"MOTION_DETECTED",...}`) 수신 확인 (사용자 확인, 2026-09-08)
+- [x] **WS-Discovery UDP Probe에 mock이 응답** — `onvif_mock.exe` 실행 후, PowerShell `UdpClient`로 WS-Discovery Probe SOAP 페이로드를 `127.0.0.1:3702`에 유니캐스트 전송 → `onvif_mock` 콘솔에 `Probe 수신 <- 127.0.0.1:53475 -> ProbeMatch 응답` 로그, 클라이언트 쪽에 `ProbeMatch` 전체 XML(`<w:XAddrs>http://127.0.0.1:8082/onvif/device_service</w:XAddrs>` 포함) 수신 확인 (사용자 확인, 2026-09-08)
+- [x] **zoom/focus 엔드포인트 OK 응답 확인** — `cgi_mock.exe` 실행 후 `Invoke-RestMethod -Uri http://localhost:8081/channel/1/zoom -Method Post -Body '{"value":10}' -ContentType application/json` → `{"data":{"result":"OK"}}` 응답, `cgi_mock` 콘솔에 `channel=1 action=zoom value=10 -> OK` 로그 확인 (사용자 확인, 2026-09-08)
+- [x] **같은 PC 루프백에서 멀티캐스트/브로드캐스트 동작** — 위 4개 테스트 전부 같은 PC 안에서 별도 방화벽 규칙 추가 없이 정상 동작. 다른 기기로 분리하는 테스트는 이번 Phase 범위에서는 안 함 — 실제로 필요해지는 시점(Phase 1 WS-Discovery 클라이언트, Phase 4 이벤트 수신)에 다시 확인. `docs/roadmap.md` 5절 리스크로 계속 추적
+- [x] **Windows 방화벽 인바운드 규칙 필요 여부** — 이번 로컬 테스트 범위에서는 별도 규칙 추가 없이 4개 컴포넌트 모두 응답/수신 정상 (같은 PC 안 loopback이라 방화벽 인바운드 필터를 안 거쳤을 가능성 있음 — 다른 기기에서 접근하는 시나리오는 위와 마찬가지로 이후 Phase에서 재확인)
+
+**상태: Phase 0 완료 (2026-09-08).** 4개 컴포넌트(mediamtx+ffmpeg, event_broadcaster, onvif_mock, cgi_mock) 빌드 및 로컬 게이트 테스트 전부 통과. onvif_mock의 디바이스 서비스 SOAP 본문은 계획대로 placeholder로 남겨두고 Phase 1에서 확정.
+
+---
+
 ## 다음 Phase 메모
 
-- Phase 3b(로컬 자격증명 캐시), Phase 0/1(RPi 테스트베드/카메라 도메인 입구)은 각각 진입 시점에 이 문서에 섹션을 이어서 추가한다.
-- RPi 확보되면 Phase 0으로 복귀.
+- Phase 0 완료. 다음은 Phase 1(카메라 도메인 입구) — 진입 시 이 문서에 세부 실행계획 섹션을 이어서 추가한다.
+- 이후 Phase 1 → 2 → (3b/4는 순서 무관) → 5(선택) → 6 순으로 진행.

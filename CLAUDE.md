@@ -6,9 +6,9 @@
 
 `standalone-vms`는 팀 프로젝트 [VEDA3-CLUE-VMS](https://github.com/gayeongit/VEDA3-CLUE-VMS)(`v2` 브랜치)의 VMS 클라이언트 파트를 기반으로, 서버 의존성을 제거하는 방향으로 재설계하는 개인 프로젝트다.
 
-기존 구조는 서버가 없으면 로그인도, 장치 조회도, 카메라 제어도 안 되는 구조였다. 이 프로젝트의 목표는 서버 없이 `VMS ↔ 카메라(현재는 RPi로 대체)`가 직접 통신해서 핵심 기능이 동작하게 만들고, 서버는 선택적 부가 기능(계정 동기화, 이벤트 히스토리)으로 내리는 것이다.
+기존 구조는 서버가 없으면 로그인도, 장치 조회도, 카메라 제어도 안 되는 구조였다. 이 프로젝트의 목표는 서버 없이 `VMS ↔ 카메라(현재는 로컬 PC에서 띄우는 목업 호스트로 대체, 나중에 RPi/실카메라로 교체 가능)`가 직접 통신해서 핵심 기능이 동작하게 만들고, 서버는 선택적 부가 기능(계정 동기화, 이벤트 히스토리)으로 내리는 것이다.
 
-RPi를 당장 쓸 수 없는 상황이라, 카메라 의존이 없는 작업(로그인/게스트 분기)부터 먼저 진행 중이다. 자세한 배경은 `docs/roadmap.md`의 "진행 순서 변경" 절 참고.
+카메라 의존이 없는 작업(로그인/게스트 분기, Phase 3a)을 먼저 끝냈고, RPi 하드웨어를 자유롭게 못 쓰는 문제는 목업 호스트를 로컬 PC에서 프로세스로 띄우는 방식으로 해결해 더 이상 하드웨어를 기다릴 필요가 없다. 자세한 배경은 `docs/roadmap.md`의 "3.5 진행 순서 변경", "3.6 RPi 제약 해결" 절 참고.
 
 ## 참고 문서
 
@@ -21,7 +21,7 @@ RPi를 당장 쓸 수 없는 상황이라, 카메라 의존이 없는 작업(로
 1. `AppState`를 접점으로 삼는다 — `selectedChannelContexts`, `channelRtspByName/Id`, `channelVideoCodecByName/Id` 등 기존 필드를 채우는 방식으로 새 입구를 만들고, 화면/미디어 계층(`ChannelSessionManager`, `StreamPlayer`, `MainScreen` 등)은 건드리지 않는다.
 2. 서비스 인터페이스는 유지하고 구현만 교체한다 — `CctvControlService`, `DeviceService` 등 시그니처 변경 금지, 내부 통신 대상만 서버 → 카메라로 바꾼다.
 3. 로그인 여부는 "데이터가 오는지 안 오는지"를 가르지 않는다 — 로그인 없이도 카메라 데이터는 항상 직접 받는다. 로그인은 부가 기능(자격증명 동기화, 이벤트 히스토리)만 얹는다.
-4. 카메라(RPi) 쪽은 정교하게 만들 필요 없다 — HTTP mock 응답, 더미 UDP 이벤트, mediamtx 스트림 정도로 충분. 목적은 VMS 로직 검증이지 카메라 재현이 아니다.
+4. 카메라(목업 호스트) 쪽은 정교하게 만들 필요 없다 — HTTP mock 응답, 더미 UDP 이벤트, mediamtx 스트림 정도로 충분. 목적은 VMS 로직 검증이지 카메라 재현이 아니다.
 
 ## 스코프 아님 (건드리지 말 것)
 
@@ -53,5 +53,7 @@ cmake --build build
 
 ## 현재 상태
 
-- Phase 3a(로그인/게스트 분기, 카메라 무관) 진행 예정 — 세부 계획은 `docs/dev_execution_plan.md` 참고
-- Phase 0(RPi 테스트 베드) / Phase 1(카메라 도메인 입구)은 RPi 확보 전까지 보류
+- Phase 3a(로그인/게스트 분기, 카메라 무관) 완료 (2026-09-03)
+- Phase 0(목업 카메라 호스트 구축, 로컬 PC) 완료 (2026-09-08) — `mock_camera_host/`에 C++/Qt로 ONVIF-lite mock/CGI mock/UDP 이벤트 브로드캐스터 구현, mediamtx+ffmpeg로 RTSP 송출. VMS 앱 코드와 별도 디렉토리·별도 CMake 빌드로 분리, 아직 VMS 쪽과 연결 안 함. 세부 내용은 `docs/dev_execution_plan.md` Phase 0 섹션 참고
+- 다음 작업: Phase 1(카메라 도메인 입구, ONVIF-lite Discovery) — `DeviceService`가 목업 호스트와 통신하도록 연결
+- RPi 하드웨어 대기 상태는 해제됨 (`docs/roadmap.md` 3.6절) — Phase 0/1/2/4/5 순서대로 진행 가능
