@@ -884,6 +884,12 @@ paths:
     runOnInit: ../ffmpeg/ffmpeg.exe -re -stream_loop -1 -i ../sample_media/sample_video.mp4 -c copy -f rtsp rtsp://localhost:8554/cam1
     runOnInitRestart: yes
 
+  # Phase 1: onvif_mock의 profile_2(GetStreamUri)가 가리키는 두 번째 채널.
+  # 같은 샘플 영상을 재사용 — mock이라 콘텐츠가 같아도 무방 (설계 원칙 4).
+  cam2:
+    runOnInit: ../ffmpeg/ffmpeg.exe -re -stream_loop -1 -i ../sample_media/sample_video.mp4 -c copy -f rtsp rtsp://localhost:8554/cam2
+    runOnInitRestart: yes
+
   # example:
   # my_camera:
   #   source: rtsp://my_camera

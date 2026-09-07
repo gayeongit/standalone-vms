@@ -5,6 +5,9 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QJsonValue>
+#include <QPointer>
+#include <QSharedPointer>
+#include <QTimer>
 
 namespace {
 QString jsonString(const QJsonValue &value)
@@ -78,9 +81,10 @@ QString normalizeDeviceType(const QString &rawType, const QString &name, const Q
 }
 } // namespace
 
-DeviceService::DeviceService(RestClient *restClient, QObject *parent)
+DeviceService::DeviceService(RestClient *restClient, OnvifLiteClient *onvifClient, QObject *parent)
     : QObject(parent)
     , m_restClient(restClient)
+    , m_onvifClient(onvifClient)
 {}
 
 void DeviceService::setDevicesPath(const QString &path)
@@ -107,6 +111,131 @@ void DeviceService::setChannelDetailPathTemplate(const QString &pathTemplate)
     }
 }
 
+void DeviceService::setDeviceSource(const QString &source)
+{
+    m_source = (source.trimmed().toLower() == QStringLiteral("server")) ? Source::Server : Source::Onvif;
+}
+
+void DeviceService::dispatchAsync(QObject *context, std::function<void()> fn)
+{
+    QPointer<QObject> guard(context);
+    QTimer::singleShot(0, this, [fn, guard, context]() {
+        if (context && !guard) {
+            return;
+        }
+        fn();
+    });
+}
+
+int DeviceService::idForUuid(const QString &uuid)
+{
+    const auto it = m_uuidToDeviceId.constFind(uuid);
+    if (it != m_uuidToDeviceId.constEnd()) {
+        return it.value();
+    }
+    const int id = m_nextSyntheticId++;
+    m_uuidToDeviceId.insert(uuid, id);
+    return id;
+}
+
+int DeviceService::idForProfileToken(const QString &uuid, const QString &token)
+{
+    const QString key = uuid + QStringLiteral("|") + token;
+    const auto it = m_profileKeyToChannelId.constFind(key);
+    if (it != m_profileKeyToChannelId.constEnd()) {
+        return it.value();
+    }
+    const int id = m_nextSyntheticId++;
+    m_profileKeyToChannelId.insert(key, id);
+    return id;
+}
+
+void DeviceService::fetchDevicesFromOnvif(
+    QObject *context,
+    std::function<void(const DeviceServiceResult &)> callback)
+{
+    if (!m_onvifClient) {
+        DeviceServiceResult result;
+        result.errorMessage = "OnvifLiteClient가 초기화되지 않았습니다.";
+        callback(result);
+        return;
+    }
+
+    m_onvifClient->discover(
+        context,
+        [this, context, callback](const QVector<OnvifLiteClient::DiscoveredDevice> &devices) {
+            if (devices.isEmpty()) {
+                DeviceServiceResult result;
+                result.ok = true;
+                callback(result);
+                return;
+            }
+
+            auto summaries = QSharedPointer<QVector<DeviceSummary>>::create();
+            auto pending = QSharedPointer<int>::create(static_cast<int>(devices.size()));
+            auto hadError = QSharedPointer<bool>::create(false);
+
+            for (const auto &discovered : devices) {
+                const int deviceId = idForUuid(discovered.uuid);
+                m_deviceIdToXAddr.insert(deviceId, discovered.xaddr);
+
+                m_onvifClient->fetchDeviceProfiles(
+                    discovered.uuid,
+                    discovered.xaddr,
+                    context,
+                    [this, deviceId, discovered, summaries, pending, hadError, callback](
+                        const OnvifLiteClient::DeviceProfilesResult &profilesResult) {
+                        DeviceSummary summary;
+                        summary.deviceId = deviceId;
+                        summary.type = QStringLiteral("CCTV");
+                        summary.ip = discovered.ip;
+
+                        if (profilesResult.ok) {
+                            summary.online = true;
+                            summary.health = QStringLiteral("OK");
+                            summary.model = profilesResult.model;
+                            summary.name = profilesResult.name.trimmed().isEmpty()
+                                ? QStringLiteral("ONVIF Device %1").arg(deviceId)
+                                : profilesResult.name;
+                            summary.channelCount = profilesResult.profiles.size();
+
+                            for (const auto &profile : profilesResult.profiles) {
+                                const int channelId = idForProfileToken(discovered.uuid, profile.token);
+                                m_channelIdToDeviceId.insert(channelId, deviceId);
+
+                                ChannelDetailResult detail;
+                                detail.ok = true;
+                                detail.deviceId = deviceId;
+                                detail.channelId = channelId;
+                                detail.channelNo = -1; // ONVIF 프로필은 번호가 아니라 token으로 식별됨
+                                detail.name = profile.name;
+                                detail.rtsp = profile.rtsp;
+                                detail.videoCodec = profile.videoCodec;
+                                m_channelDetailCache.insert(channelId, detail);
+                            }
+                        } else {
+                            *hadError = true;
+                            summary.online = false;
+                            summary.health = QStringLiteral("DOWN");
+                            summary.name = QStringLiteral("ONVIF Device %1").arg(deviceId);
+                        }
+                        summaries->push_back(summary);
+
+                        *pending -= 1;
+                        if (*pending <= 0) {
+                            DeviceServiceResult result;
+                            result.ok = true;
+                            result.devices = *summaries;
+                            if (*hadError) {
+                                result.errorMessage = "일부 장치의 채널 정보를 가져오지 못했습니다.";
+                            }
+                            callback(result);
+                        }
+                    });
+            }
+        });
+}
+
 void DeviceService::fetchDevices(
     QObject *context,
     std::function<void(const DeviceServiceResult &)> callback)
@@ -114,6 +243,21 @@ void DeviceService::fetchDevices(
     if (!callback) {
         return;
     }
+
+    if (m_source == Source::Onvif) {
+        m_uuidToDeviceId.clear();
+        m_deviceIdToXAddr.clear();
+        m_profileKeyToChannelId.clear();
+        m_channelIdToDeviceId.clear();
+        m_channelDetailCache.clear();
+        m_nextSyntheticId = 1;
+        if (m_onvifClient) {
+            m_onvifClient->invalidate();
+        }
+        fetchDevicesFromOnvif(context, std::move(callback));
+        return;
+    }
+
     if (!m_restClient) {
         DeviceServiceResult result;
         result.ok = false;
@@ -169,13 +313,36 @@ void DeviceService::fetchDeviceChannels(
     base.deviceId = deviceId;
     if (deviceId < 0) {
         base.ok = false;
-        base.errorMessage = "deviceId媛 ?좏슚?섏? ?딆뒿?덈떎.";
+        base.errorMessage = "deviceId가 유효하지 않습니다.";
         callback(base);
         return;
     }
+
+    if (m_source == Source::Onvif) {
+        DeviceChannelsResult result;
+        result.deviceId = deviceId;
+        result.ok = true;
+        for (auto it = m_channelIdToDeviceId.constBegin(); it != m_channelIdToDeviceId.constEnd(); ++it) {
+            if (it.value() != deviceId) {
+                continue;
+            }
+            const auto detailIt = m_channelDetailCache.constFind(it.key());
+            if (detailIt == m_channelDetailCache.constEnd()) {
+                continue;
+            }
+            DeviceChannelSummary summary;
+            summary.channelId = it.key();
+            summary.channelNo = detailIt.value().channelNo;
+            summary.name = detailIt.value().name;
+            result.channels.push_back(summary);
+        }
+        dispatchAsync(context, [callback, result]() { callback(result); });
+        return;
+    }
+
     if (!m_restClient) {
         base.ok = false;
-        base.errorMessage = "DeviceService媛 珥덇린?붾릺吏 ?딆븯?듬땲??";
+        base.errorMessage = "DeviceService가 초기화되지 않았습니다.";
         callback(base);
         return;
     }
@@ -207,7 +374,7 @@ void DeviceService::fetchDeviceChannels(
                 result.channels.push_back(parseDeviceChannelObject(resp.json));
             } else {
                 result.ok = false;
-                result.errorMessage = "?μ튂 梨꾨꼸 ?묐떟 ?뺤떇???댁꽍?????놁뒿?덈떎.";
+                result.errorMessage = "장치 채널 응답 형식을 해석할 수 없습니다.";
             }
             callback(result);
         });
@@ -225,13 +392,28 @@ void DeviceService::fetchChannelDetail(
     base.channelId = channelId;
     if (channelId < 0) {
         base.ok = false;
-        base.errorMessage = "channelId媛 ?좏슚?섏? ?딆뒿?덈떎.";
+        base.errorMessage = "channelId가 유효하지 않습니다.";
         callback(base);
         return;
     }
+
+    if (m_source == Source::Onvif) {
+        const auto it = m_channelDetailCache.constFind(channelId);
+        ChannelDetailResult result;
+        if (it != m_channelDetailCache.constEnd()) {
+            result = it.value();
+        } else {
+            result.channelId = channelId;
+            result.ok = false;
+            result.errorMessage = "채널 정보를 찾을 수 없습니다.";
+        }
+        dispatchAsync(context, [callback, result]() { callback(result); });
+        return;
+    }
+
     if (!m_restClient) {
         base.ok = false;
-        base.errorMessage = "DeviceService媛 珥덇린?붾릺吏 ?딆븯?듬땲??";
+        base.errorMessage = "DeviceService가 초기화되지 않았습니다.";
         callback(base);
         return;
     }
@@ -260,7 +442,7 @@ void DeviceService::fetchChannelDetail(
             }
             if (obj.isEmpty()) {
                 result.ok = false;
-                result.errorMessage = "梨꾨꼸 ?곸꽭 ?묐떟?먯꽌 data瑜?李얠쓣 ???놁뒿?덈떎.";
+                result.errorMessage = "채널 상세 응답에서 data를 찾을 수 없습니다.";
                 callback(result);
                 return;
             }
@@ -269,7 +451,7 @@ void DeviceService::fetchChannelDetail(
             result.httpStatus = resp.httpStatus;
             if (result.rtsp.trimmed().isEmpty()) {
                 result.ok = false;
-                result.errorMessage = "梨꾨꼸 ?곸꽭 ?묐떟??RTSP URL???놁뒿?덈떎.";
+                result.errorMessage = "채널 상세 응답에 RTSP URL이 없습니다.";
             }
             callback(result);
         });

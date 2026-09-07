@@ -1,12 +1,10 @@
-// Phase 0 목업 카메라 호스트 — ONVIF-lite mock.
+// Phase 1 목업 카메라 호스트 — ONVIF-lite mock.
 //
-// WS-Discovery(Probe -> ProbeMatch)는 표준 스펙 그대로 구현했다 — 이건 고정된 포맷이라
-// 지금 확정해도 문제없음.
+// WS-Discovery(Probe -> ProbeMatch)는 표준 스펙 그대로 구현했다 — 고정된 포맷이라 그대로 유지.
 //
-// 디바이스 서비스(GetDeviceInformation/GetProfiles/GetStreamUri)의 실제 SOAP 응답 필드는
-// Phase 1의 OnvifLiteClient가 무엇을 파싱해서 AppState/SelectedChannelContext로 넘길지와
-// 맞물리므로, 지금은 자리만 잡아둔 placeholder다. Phase 1 착수 시점에 다시 조율한다
-// (docs/dev_execution_plan.md Phase 0 참고).
+// 디바이스 서비스(GetDeviceInformation/GetProfiles/GetStreamUri)는 OnvifLiteClient가 실제로
+// 파싱하는 최소 필드만 채운다 — 설계 원칙 4(카메라 쪽은 정교하게 만들 필요 없다)에 따라
+// 액션 판별도 QXmlStreamReader 없이 단순 substring 검사로 충분하다.
 
 #include <QCoreApplication>
 #include <QDebug>
@@ -16,6 +14,7 @@
 #include <QTcpSocket>
 #include <QUdpSocket>
 #include <QUuid>
+#include <QVector>
 
 namespace {
 
@@ -29,6 +28,28 @@ constexpr quint16 kDeviceServicePort = 8082;
 const QString kDeviceServiceXAddr =
     QStringLiteral("http://127.0.0.1:%1/onvif/device_service").arg(kDeviceServicePort);
 const QString kDeviceUuid = QStringLiteral("urn:uuid:4b2a6b8e-0000-4000-8000-000000000001"); // 고정 더미 UUID
+
+struct MockProfile
+{
+    QString token;
+    QString name;
+    QString videoCodec;
+    int width;
+    int height;
+    QString rtsp;
+};
+
+const QVector<MockProfile> &mockProfiles()
+{
+    // mediamtx.yml의 cam1/cam2 경로와 1:1 대응.
+    static const QVector<MockProfile> profiles = {
+        {QStringLiteral("profile_1"), QStringLiteral("Channel 1"), QStringLiteral("H264"), 1920, 1080,
+         QStringLiteral("rtsp://127.0.0.1:8554/cam1")},
+        {QStringLiteral("profile_2"), QStringLiteral("Channel 2"), QStringLiteral("H264"), 1920, 1080,
+         QStringLiteral("rtsp://127.0.0.1:8554/cam2")},
+    };
+    return profiles;
+}
 
 QString extractMessageId(const QByteArray &probe)
 {
@@ -66,29 +87,91 @@ QByteArray buildProbeMatch(const QString &relatesTo)
         .toUtf8();
 }
 
-// TODO(Phase 1): GetDeviceInformation/GetProfiles/GetStreamUri 각각의 실제 응답 필드를
-// OnvifLiteClient 파서와 맞춰서 채운다. 지금은 어떤 SOAP action이 왔는지만 로그로 확인.
-QByteArray buildDeviceServicePlaceholderResponse(const QByteArray &requestBody)
+QByteArray wrapSoapEnvelope(const QString &bodyContent)
 {
-    QString action = QStringLiteral("Unknown");
-    for (const QString &candidate : {QStringLiteral("GetDeviceInformation"),
-                                      QStringLiteral("GetProfiles"),
-                                      QStringLiteral("GetStreamUri")}) {
-        if (requestBody.contains(candidate.toUtf8())) {
-            action = candidate;
+    return QStringLiteral(
+               "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+               "<e:Envelope xmlns:e=\"http://www.w3.org/2003/05/soap-envelope\" "
+               "xmlns:tds=\"http://www.onvif.org/ver10/device/wsdl\" "
+               "xmlns:trt=\"http://www.onvif.org/ver10/media/wsdl\" "
+               "xmlns:tt=\"http://www.onvif.org/ver10/schema\">"
+               "<e:Body>%1</e:Body></e:Envelope>")
+        .arg(bodyContent)
+        .toUtf8();
+}
+
+QByteArray buildGetDeviceInformationResponse()
+{
+    return wrapSoapEnvelope(QStringLiteral(
+        "<tds:GetDeviceInformationResponse>"
+        "<tds:Manufacturer>MockCameraHost</tds:Manufacturer>"
+        "<tds:Model>Phase1-Mock</tds:Model>"
+        "<tds:SerialNumber>MOCK-0001</tds:SerialNumber>"
+        "</tds:GetDeviceInformationResponse>"));
+}
+
+QByteArray buildGetProfilesResponse()
+{
+    QString profilesXml;
+    for (const auto &profile : mockProfiles()) {
+        profilesXml += QStringLiteral(
+                            "<trt:Profiles token=\"%1\">"
+                            "<tt:Name>%2</tt:Name>"
+                            "<tt:VideoEncoderConfiguration>"
+                            "<tt:Encoding>%3</tt:Encoding>"
+                            "<tt:Resolution><tt:Width>%4</tt:Width><tt:Height>%5</tt:Height></tt:Resolution>"
+                            "</tt:VideoEncoderConfiguration>"
+                            "</trt:Profiles>")
+                            .arg(profile.token, profile.name, profile.videoCodec,
+                                 QString::number(profile.width), QString::number(profile.height));
+    }
+    return wrapSoapEnvelope(
+        QStringLiteral("<trt:GetProfilesResponse>%1</trt:GetProfilesResponse>").arg(profilesXml));
+}
+
+QString extractProfileToken(const QByteArray &requestBody)
+{
+    static const QRegularExpression pattern(
+        QStringLiteral("<[^>]*ProfileToken[^>]*>([^<]*)</[^>]*ProfileToken>"));
+    const auto match = pattern.match(QString::fromUtf8(requestBody));
+    return match.hasMatch() ? match.captured(1).trimmed() : QString();
+}
+
+QByteArray buildGetStreamUriResponse(const QString &profileToken)
+{
+    QString uri;
+    for (const auto &profile : mockProfiles()) {
+        if (profile.token == profileToken) {
+            uri = profile.rtsp;
             break;
         }
     }
-    qInfo().noquote() << "onvif_mock: device_service SOAP action =" << action
-                       << "(placeholder 응답, Phase 1에서 확정)";
+    if (uri.isEmpty() && !mockProfiles().isEmpty()) {
+        uri = mockProfiles().first().rtsp; // 토큰을 못 찾으면 첫 채널로 폴백 (mock이라 정교함 불필요)
+    }
+    return wrapSoapEnvelope(
+        QStringLiteral("<trt:GetStreamUriResponse><trt:MediaUri><tt:Uri>%1</tt:Uri></trt:MediaUri>"
+                        "</trt:GetStreamUriResponse>")
+            .arg(uri));
+}
 
-    return QStringLiteral(
-               "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-               "<e:Envelope xmlns:e=\"http://www.w3.org/2003/05/soap-envelope\">"
-               "<e:Body><!-- TODO(Phase 1): %1 응답 필드 확정 --></e:Body>"
-               "</e:Envelope>")
-        .arg(action)
-        .toUtf8();
+QByteArray buildDeviceServiceResponse(const QByteArray &requestBody)
+{
+    if (requestBody.contains("GetStreamUri")) {
+        const QString token = extractProfileToken(requestBody);
+        qInfo().noquote() << "onvif_mock: GetStreamUri token=" << token;
+        return buildGetStreamUriResponse(token);
+    }
+    if (requestBody.contains("GetProfiles")) {
+        qInfo().noquote() << "onvif_mock: GetProfiles";
+        return buildGetProfilesResponse();
+    }
+    if (requestBody.contains("GetDeviceInformation")) {
+        qInfo().noquote() << "onvif_mock: GetDeviceInformation";
+        return buildGetDeviceInformationResponse();
+    }
+    qWarning().noquote() << "onvif_mock: 처리 못한 device_service SOAP 요청";
+    return wrapSoapEnvelope(QStringLiteral("<!-- unsupported action -->"));
 }
 
 void startDiscoveryListener(QObject *parent)
@@ -149,7 +232,7 @@ void handleDeviceServiceRequest(QTcpSocket *socket)
     }
     const QByteArray body = buf.mid(bodyStart, contentLength);
 
-    const QByteArray responseBody = buildDeviceServicePlaceholderResponse(body);
+    const QByteArray responseBody = buildDeviceServiceResponse(body);
     const QByteArray response = QStringLiteral(
                                      "HTTP/1.1 200 OK\r\n"
                                      "Content-Type: application/soap+xml\r\n"

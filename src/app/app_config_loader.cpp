@@ -124,6 +124,18 @@ bool loadAppConfig(AppConfig *out, QString *errorMessage)
     if (!channelDetailPath.isEmpty()) {
         out->channelDetailPathTemplate = channelDetailPath;
     }
+    const QString deviceSource = deviceObj.value("source").toString().trimmed().toLower();
+    if (deviceSource == "server" || deviceSource == "onvif") {
+        out->deviceSource = deviceSource;
+    }
+    const int onvifDiscoveryTimeoutMs = deviceObj.value("onvifDiscoveryTimeoutMs").toInt(0);
+    if (onvifDiscoveryTimeoutMs > 0) {
+        out->onvifDiscoveryTimeoutMs = onvifDiscoveryTimeoutMs;
+    }
+    const QString onvifManualXAddr = deviceObj.value("onvifManualXAddr").toString().trimmed();
+    if (!onvifManualXAddr.isEmpty()) {
+        out->onvifManualXAddr = onvifManualXAddr;
+    }
 
     const QJsonObject cctvObj = root.value("cctv").toObject();
     const QString zoomPath = cctvObj.value("zoomPath").toString().trimmed();

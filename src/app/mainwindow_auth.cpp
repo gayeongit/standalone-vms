@@ -9,6 +9,7 @@
 #include "common_ui.h"
 #include "cctv_control_service.h"
 #include "device_service.h"
+#include "onvif_lite_client.h"
 #include "event_service.h"
 #include "event_ui_helpers.h"
 #include "login_screen.h"
@@ -387,10 +388,15 @@ bool MainWindow::initializeAuthServices()
     m_authService->setLogoutPath(config.logoutPath);
     m_authService->setSignupPath(config.signupPath);
 
-    m_deviceService = new DeviceService(m_restClient, this);
+    m_onvifLiteClient = new OnvifLiteClient(this);
+    m_onvifLiteClient->setDiscoveryTimeoutMs(config.onvifDiscoveryTimeoutMs);
+    m_onvifLiteClient->setManualXAddr(config.onvifManualXAddr);
+
+    m_deviceService = new DeviceService(m_restClient, m_onvifLiteClient, this);
     m_deviceService->setDevicesPath(config.devicesPath);
     m_deviceService->setDeviceChannelsPathTemplate(config.deviceChannelsPathTemplate);
     m_deviceService->setChannelDetailPathTemplate(config.channelDetailPathTemplate);
+    m_deviceService->setDeviceSource(config.deviceSource);
 
     m_cctvControlService = new CctvControlService(m_restClient, this);
     m_cctvControlService->setZoomPathTemplate(config.cctvZoomPathTemplate);

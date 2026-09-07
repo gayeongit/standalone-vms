@@ -17,6 +17,7 @@ class PlaybackScreen;
 class RestClient;
 class AuthService;
 class DeviceService;
+class OnvifLiteClient;
 class CctvControlService;
 class PlaybackService;
 class UgvService;
@@ -65,6 +66,7 @@ private:
     RestClient *m_restClient = nullptr;
     AuthService *m_authService = nullptr;
     DeviceService *m_deviceService = nullptr;
+    OnvifLiteClient *m_onvifLiteClient = nullptr;
     CctvControlService *m_cctvControlService = nullptr;
     PlaybackService *m_playbackService = nullptr;
     UgvService *m_ugvService = nullptr;

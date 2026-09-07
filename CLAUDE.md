@@ -54,6 +54,8 @@ cmake --build build
 ## 현재 상태
 
 - Phase 3a(로그인/게스트 분기, 카메라 무관) 완료 (2026-09-03)
-- Phase 0(목업 카메라 호스트 구축, 로컬 PC) 완료 (2026-09-08) — `mock_camera_host/`에 C++/Qt로 ONVIF-lite mock/CGI mock/UDP 이벤트 브로드캐스터 구현, mediamtx+ffmpeg로 RTSP 송출. VMS 앱 코드와 별도 디렉토리·별도 CMake 빌드로 분리, 아직 VMS 쪽과 연결 안 함. 세부 내용은 `docs/dev_execution_plan.md` Phase 0 섹션 참고
-- 다음 작업: Phase 1(카메라 도메인 입구, ONVIF-lite Discovery) — `DeviceService`가 목업 호스트와 통신하도록 연결
+- Phase 0(목업 카메라 호스트 구축, 로컬 PC) 완료 (2026-09-08) — `mock_camera_host/`에 C++/Qt로 ONVIF-lite mock/CGI mock/UDP 이벤트 브로드캐스터 구현, mediamtx+ffmpeg로 RTSP 송출. VMS 앱 코드와 별도 디렉토리·별도 CMake 빌드로 분리
+- Phase 1(카메라 자동 탐색, ONVIF-lite Discovery) 완료 (2026-09-08) — `OnvifLiteClient` 신설, `DeviceService`가 `device.source`(기본 `"onvif"`)로 서버/목업 분기, `DeviceCheckScreen`/`mainwindow_auth.cpp`의 `startRequested` 핸들러는 무수정. 목업 호스트 대상 DeviceCheck→Main 재생 확인 완료. 세부 내용은 `docs/dev_execution_plan.md` Phase 1 섹션 참고
+- 다음 작업: Phase 2(CctvControlService 직접 제어 전환) — control 와이어 포맷을 GET+query-param 스타일로 전환하기로 결정됨(문서화만 완료, 구현은 Phase 2에서)
+- 포트폴리오용 요약: `docs/refactoring_improvements.md` (왜 리팩토링했는지 + 무엇을 개선했는지, 세부 실행 로그와 별개로 성과 관점 정리)
 - RPi 하드웨어 대기 상태는 해제됨 (`docs/roadmap.md` 3.6절) — Phase 0/1/2/4/5 순서대로 진행 가능

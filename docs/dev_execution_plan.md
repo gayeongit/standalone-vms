@@ -137,7 +137,57 @@ Phase 0부터는 실제 카메라 역할을 하는 대상(원래 계획은 RPi)�
 
 ---
 
+## Phase 1. 카메라 자동 탐색 (ONVIF-lite)
+
+### 진입 전 결정 (2026-09-08)
+
+Phase 1 착수 전, 기존 서버 REST API 형식을 그대로 카메라/목업 쪽에 이어 쓸지 재검토했다. 조사 결과와 결정:
+
+- **현재 서버 API 챗니스 측정**: `DeviceService`(`fetchDevices`→`fetchDeviceChannels`→`fetchChannelDetail`) 기준 디바이스 2개·채널 2개면 정상 케이스 7회, 재시도 겹치면 최대 9회 HTTP 호출. 배칭/캐싱 없음.
+- **ONVIF-lite 리서치**: `GetProfiles`가 채널 목록+해상도/코덱을 한 번에 반환해 "채널 목록"과 "채널 상세"를 하나로 합침. `WS-Discovery(1) → 디바이스당(GetCapabilities/GetDeviceInformation 1 + GetProfiles 1 + 채널당 GetStreamUri 1)`로 구조적으로 flat.
+- **결정 1 (discovery)**: ONVIF-lite 유지. 챗니스 문제를 구조적으로 해결.
+- **결정 2 (control, Phase 2 대상)**: SUNAPI를 그대로 베끼지 않고 GET+query-param "카메라스러운" CGI 스타일로 전환. 지금 구현 안 함, Phase 2에서 `cgi_mock.cpp`/`CctvControlService`를 같이 고칠 때 적용.
+
+세부 내용은 `C:\Users\yeong\.claude\plans\phase-wobbly-cray.md`(승인된 계획) 참고.
+
+### 구현 내용
+
+- **`OnvifLiteClient`** 신설 (`include/services/onvif_lite_client.h`, `src/services/onvif_lite_client.cpp`) — `RestClient`와 동급 계층(프로토콜 클라이언트, `AppState`/`SelectedChannelContext` 모름).
+  - `discover(...)`: WS-Discovery Probe(UDP multicast 239.255.255.250:3702) 전송, `discoveryTimeoutMs` 동안 ProbeMatch 수집. 결과는 `invalidate()` 전까지 캐시. `setManualXAddr(...)`로 WS-Discovery가 막힌 환경을 위한 수동 fallback 지원.
+  - `fetchDeviceProfiles(uuid, xaddr, ...)`: `GetDeviceInformation` → `GetProfiles` → 프로필별 `GetStreamUri`를 한 시퀀스로 처리, uuid별로 메모이즈. SOAP 요청은 `QNetworkAccessManager::post`, 응답 파싱은 네임스페이스 접두어에 안 흔들리는 local-name 정규식 매칭(`extractSingleValue`) — 설계 원칙 4에 따라 `QXmlStreamReader` 없이 최소로.
+- **`DeviceService` 내부 재배선** (public 시그니처 무변경) — `device.source` 설정에 따라 분기:
+  - `fetchDevices(...)`: onvif 소스면 `discover()` 후 디바이스별 `fetchDeviceProfiles()`를 병렬 fan-out(pending 카운터 패턴)으로 한 번에 실행해, 채널 목록+RTSP+코덱까지 이 시점에 전부 `m_channelDetailCache`에 캐싱. 매 reload마다 캐시 전체 무효화 + `OnvifLiteClient::invalidate()`.
+  - `fetchDeviceChannels(deviceId, ...)` / `fetchChannelDetail(channelId, ...)`: onvif 소스면 **캐시만 읽고 새 SOAP 호출 없음** — `QTimer::singleShot(0, ...)`으로 항상 비동기 디스패치해 기존 콜백 계약(동기 콜백으로 인한 `mainwindow_auth.cpp`의 `pending` 카운터 재진입 위험) 보존.
+  - uuid/profile-token ↔ 합성 `int deviceId`/`channelId` 매핑은 `DeviceService` 내부 `QHash`로 관리.
+  - `device.source: "server"`면 기존 REST 경로 그대로 (무수정).
+- **`app_config.json` / `AppConfig`**: `device.source`(기본 `"onvif"`), `device.onvifDiscoveryTimeoutMs`(기본 1500), `device.onvifManualXAddr` 추가.
+- **`mainwindow.h`/`mainwindow_auth.cpp`**: `m_onvifLiteClient` 멤버 추가, `initializeAuthServices()`에서 생성 후 `DeviceService` 생성자에 주입 + `setDeviceSource(...)` 호출. `DeviceCheckScreen`/`startRequested` 핸들러는 무수정.
+- **`mock_camera_host/onvif_mock.cpp`**: Phase 0의 placeholder를 실제 응답으로 구현. `GetDeviceInformation`(Manufacturer/Model/SerialNumber), `GetProfiles`(프로필 2개, `profile_1`/`profile_2`, 각각 Name/Encoding/Resolution), `GetStreamUri`(요청의 `ProfileToken`으로 mediamtx 경로 매핑: `profile_1→cam1`, `profile_2→cam2`).
+- **`mock_camera_host/mediamtx/mediamtx.yml`**: `cam2` 경로 추가 (같은 샘플 영상 재사용).
+- **부수 정리**: `device_service.cpp`에 남아있던 인코딩 깨진 한글 에러 문구 6곳을 이번에 손댄 함수 안이라 같이 정리.
+
+### 빌드 확인
+
+- `VMS_v2` 메인 프로젝트: `cmake --build build` exit code 0 (OnvifLiteClient 추가 시 최초 1회 AUTOMOC 캐시가 안 갱신되는 이슈 있었음 — `VMS_v2_autogen` clean 후 재빌드로 해결)
+- `mock_camera_host`: `cmake --build mock_camera_host/build` exit code 0, 3개 타깃 전부 정상
+
+### 완료 기준
+
+- [x] `OnvifLiteClient` 구현 + `DeviceService` 재배선 + config 분기 + mock host 실제 SOAP 응답, 컴파일/링크 성공
+- [x] 실제 실행으로 게이트 테스트 (아래) — 사용자 확인 완료 (2026-09-08)
+
+### 게이트 테스트
+
+- [x] `mock_camera_host`의 `onvif_mock.exe`(3702/8082) + `mediamtx.exe`(cam1+cam2, 8554) 실행, 서버는 끈 상태에서 VMS 게스트 진입 → DeviceCheck 화면에 목업 디바이스/채널 2개가 뜸 (사용자 확인)
+- [x] 채널 선택 → "VMS 시작" → Main 화면 멀티뷰/전체화면에서 실제 mediamtx RTSP(cam1/cam2) 재생됨 (사용자 확인). 중간에 이 저장소의 VMS_v2 빌드가 `VMS_WITH_GSTREAMER=0`으로 잡혀 있어 재생이 전혀 안 되는 별도 이슈가 있었음 — pkg-config가 PATH에 없어 CMake가 GStreamer(설치는 이미 돼 있었음)를 못 찾은 것. GStreamer `bin` 폴더를 PATH에 추가하고 재구성/재빌드해서 해결(Phase 1 코드와는 무관한 로컬 환경 이슈)
+- [x] DeviceCheckScreen 새로고침 시 크래시/중복 호출 없이 다시 스캔됨 (사용자 확인)
+- [ ] (선택, 미실행) `device.source`를 `"server"`로 바꾸고 기존 서버 켠 상태에서 기존 REST 흐름이 회귀 없이 동작하는지 — 필수 아님
+
+**상태: Phase 1 완료 (2026-09-08).** `OnvifLiteClient` + `DeviceService` 캐싱으로 디바이스 조회 챗니스(7~9회 → discovery+프로필 조회 1세트) 구조적으로 해결, 목업 호스트 대상으로 엔드투엔드(DeviceCheck→Main 재생) 확인 완료.
+
+---
+
 ## 다음 Phase 메모
 
-- Phase 0 완료. 다음은 Phase 1(카메라 도메인 입구) — 진입 시 이 문서에 세부 실행계획 섹션을 이어서 추가한다.
-- 이후 Phase 1 → 2 → (3b/4는 순서 무관) → 5(선택) → 6 순으로 진행.
+- Phase 1 완료. 다음은 Phase 2(CctvControlService 직접 제어 전환) — 착수 시 이 문서에 세부 실행계획 섹션을 이어서 추가한다. control 와이어 포맷을 GET+query-param 스타일로 전환하기로 이미 결정됨(Phase 1 진입 전 결정 참고) — `cgi_mock.cpp`/`CctvControlService`를 같이 고친다.
+- 이후 Phase 2 → (3b/4는 순서 무관) → 5(선택) → 6 순으로 진행.
