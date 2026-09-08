@@ -43,6 +43,26 @@ QByteArray buildActionRequest(const QString &prefix, const QString &ns, const QS
     return wrapSoapRequest(QStringLiteral("<%1:%2 xmlns:%1=\"%3\"/>").arg(prefix, action, ns));
 }
 
+QByteArray buildGetCapabilitiesRequest()
+{
+    return buildActionRequest(QStringLiteral("tds"), QStringLiteral("http://www.onvif.org/ver10/device/wsdl"),
+                               QStringLiteral("GetCapabilities"));
+}
+
+// GetCapabilities 응답에서 <Media>/<PTZ>/<Imaging> 블록 안의 <XAddr>를 뽑는다.
+// 블록마다 태그 이름이 달라서 parseProfiles와 달리 전체를 한 번에 매칭할 필요 없이
+// 서비스 이름별로 하나씩 뽑으면 된다.
+QString extractServiceXAddr(const QString &text, const QString &serviceTag)
+{
+    const QRegularExpression blockPattern(
+        QStringLiteral("<[^:>]*:%1[^>]*>(.*?)</[^:>]*:%1>").arg(serviceTag));
+    const auto match = blockPattern.match(text);
+    if (!match.hasMatch()) {
+        return QString();
+    }
+    return extractSingleValue(match.captured(1), QStringLiteral("XAddr"));
+}
+
 QByteArray buildGetStreamUriRequest(const QString &profileToken)
 {
     return wrapSoapRequest(
@@ -274,20 +294,51 @@ void OnvifLiteClient::fetchDeviceProfiles(
             const QString manufacturer = extractSingleValue(text, QStringLiteral("Manufacturer"));
             result.name = manufacturer.isEmpty() ? result.model : manufacturer + QStringLiteral(" ") + result.model;
 
+            // GetDeviceInformation 다음은 GetCapabilities — Media/PTZ/Imaging 서비스가
+            // Device Service(xaddr)와 다른 주소일 수 있으므로, 이후 호출은 여기서 얻은
+            // 주소로 보내야 한다 (예전엔 이 단계를 건너뛰고 xaddr을 그대로 재사용했음).
             postSoap(
                 xaddr,
-                buildActionRequest(QStringLiteral("trt"), QStringLiteral("http://www.onvif.org/ver10/media/wsdl"),
-                                    QStringLiteral("GetProfiles")),
+                buildGetCapabilitiesRequest(),
                 context,
-                [this, result, context, callback](bool ok2, const QByteArray &body2, const QString &errorMessage2) mutable {
-                    if (!ok2) {
-                        result.errorMessage = errorMessage2;
+                [this, result, context, callback](bool okCaps, const QByteArray &capsBody, const QString &capsError) mutable {
+                    if (!okCaps) {
+                        result.errorMessage = capsError;
                         m_profileCache.insert(result.uuid, result);
                         callback(result);
                         return;
                     }
-                    result.profiles = parseProfiles(body2);
-                    fetchStreamUrisSequentially(result, 0, context, callback);
+                    const QString capsText = QString::fromUtf8(capsBody);
+                    result.mediaXAddr = extractServiceXAddr(capsText, QStringLiteral("Media"));
+                    result.ptzXAddr = extractServiceXAddr(capsText, QStringLiteral("PTZ"));
+                    result.imagingXAddr = extractServiceXAddr(capsText, QStringLiteral("Imaging"));
+                    // 응답에 특정 서비스가 없으면(또는 파싱 실패) Device Service 주소로 폴백 —
+                    // 완전히 막히기보다는 예전 동작(단일 주소 재사용)으로 완만하게 떨어지게.
+                    if (result.mediaXAddr.trimmed().isEmpty()) {
+                        result.mediaXAddr = result.xaddr;
+                    }
+                    if (result.ptzXAddr.trimmed().isEmpty()) {
+                        result.ptzXAddr = result.xaddr;
+                    }
+                    if (result.imagingXAddr.trimmed().isEmpty()) {
+                        result.imagingXAddr = result.xaddr;
+                    }
+
+                    postSoap(
+                        result.mediaXAddr,
+                        buildActionRequest(QStringLiteral("trt"), QStringLiteral("http://www.onvif.org/ver10/media/wsdl"),
+                                            QStringLiteral("GetProfiles")),
+                        context,
+                        [this, result, context, callback](bool ok2, const QByteArray &body2, const QString &errorMessage2) mutable {
+                            if (!ok2) {
+                                result.errorMessage = errorMessage2;
+                                m_profileCache.insert(result.uuid, result);
+                                callback(result);
+                                return;
+                            }
+                            result.profiles = parseProfiles(body2);
+                            fetchStreamUrisSequentially(result, 0, context, callback);
+                        });
                 });
         });
 }
@@ -307,7 +358,7 @@ void OnvifLiteClient::fetchStreamUrisSequentially(
 
     const QString token = result.profiles.at(index).token;
     postSoap(
-        result.xaddr,
+        result.mediaXAddr,
         buildGetStreamUriRequest(token),
         context,
         [this, result, index, context, callback](bool ok, const QByteArray &body, const QString & /*errorMessage*/) mutable {

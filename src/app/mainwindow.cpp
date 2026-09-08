@@ -375,7 +375,8 @@ void MainWindow::initializeState()
     state.selectedChannelContexts.clear();
     state.channelRtspByName.clear();
     state.channelRtspById.clear();
-    state.channelOnvifXAddrById.clear();
+    state.channelOnvifPtzXAddrById.clear();
+    state.channelOnvifImagingXAddrById.clear();
     state.channelOnvifProfileTokenById.clear();
     state.clearAllGridCells();  // 메인화면 멀티뷰 셀 초기화
     pruneStateDeviceSelection(state);

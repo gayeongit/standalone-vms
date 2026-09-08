@@ -47,11 +47,11 @@ fetchDevices()              — 디바이스 목록 (1회)
 실제 카메라(RPi 등)를 당장 확보할 수 없는 상황이라, "카메라처럼 응답하는 대상"을 로컬 PC에서 직접 만들었다. `mock_camera_host/`에 VMS 앱 코드와 완전히 분리된 독립 빌드로 4개 컴포넌트를 C++/Qt로 구현:
 
 - **ONVIF-lite mock** — WS-Discovery(UDP)/GetDeviceInformation/GetProfiles/GetStreamUri
-- **CGI mock** — zoom/focus 제어 엔드포인트
+- **CGI mock** — zoom/focus 제어 엔드포인트 (POST+JSON body). *이후 Phase 2에서 제어를 ONVIF PTZ/Imaging으로 바꾸면서 실제로는 안 쓰게 됐다 — 2.4절 참고. 삭제하지 않고 코드는 남겨둠.*
 - **UDP 이벤트 브로드캐스터** — 카메라가 쏘는 더미 이벤트
 - **mediamtx + ffmpeg** — 실제 RTSP 스트림 송출(루프 영상)
 
-카메라 프로토콜(ONVIF-lite SOAP/HTTP CGI/RTSP/UDP)만 맞으면 이후 RPi나 실제 카메라로 그대로 교체 가능한 구조다.
+카메라 프로토콜(ONVIF-lite SOAP/RTSP/UDP)만 맞으면 이후 RPi나 실제 카메라로 그대로 교체 가능한 구조다.
 
 ### 2.3 API 호출 구조 개선 — ONVIF-lite 도입으로 라운드트립 축소 (Phase 1)
 
@@ -75,11 +75,23 @@ discover()                    — WS-Discovery Probe (네트워크 전체, 1회)
 
 Phase 2 착수 시점에 "PTZ 제어 API가 카메라 벤더마다 다 다른데, 우리가 만드는 CGI 방식도 결국 아무 카메라도 안 쓰는 방언 아닌가?"라는 질문에서 다시 설계를 검토했다.
 
-- 한화 SUNAPI, Axis VAPIX, Dahua CGI는 서로 호환되지 않는 벤더별 형식이다. Phase 1에서 이미 만든 "GET+query-param" CGI도 실제로는 우리 mock 하나만 아는 방언이라 범용성이 없었다.
+- 한화 SUNAPI, Axis VAPIX, Dahua CGI는 서로 호환되지 않는 벤더별 형식이다. Phase 2 착수 전 "SUNAPI를 그대로 베끼지 않는 GET+query-param 스타일" 정도로 잠정 결정해뒀던 것도(2.3절), 구현에 들어가기 전에 다시 보니 결국 우리 mock 하나만 아는 방언이 될 뿐이라 방향을 바꿨다.
 - ONVIF는 PTZ(`RelativeMove`)/Imaging(`Move`) 서비스를 표준화해뒀다 — ONVIF Profile S를 지원하는 실제 카메라라면 공통으로 동작한다.
 - 현재 UI는 "누르면 -100~100 중 한 스텝만큼 이동"하는 discrete 방식이라, "누르고 있는 동안 계속 이동"하는 `ContinuousMove`보다 "정해진 양만큼 이동 후 정지"하는 `RelativeMove`/Imaging `Move`(Relative)가 UX와 정확히 맞아떨어졌다.
 
 그래서 discovery(Phase 1)와 제어(Phase 2)를 같은 ONVIF 프로토콜 계열로 통일했다. `CctvControlService`의 public 시그니처(`zoomStep`/`focusStep`, step 검증 -100~100)는 그대로 두고 내부 구현만 REST POST+JSON body → ONVIF SOAP `RelativeMove`/`Move`로 교체했다. channelId별로 필요한 ONVIF 주소/프로필 토큰은 discovery 시점에 이미 알아낸 정보를 `AppState`에 노출해서 재사용했다 — 서비스 간에 새로운 의존을 만들지 않고 "AppState를 접점으로 삼는다"는 원칙을 그대로 지킨 것.
+
+### 2.5 뒤늦게 발견한 누락 — GetCapabilities (Phase 1/2 사후 보정)
+
+Phase 1/2가 끝난 뒤 ONVIF 실제 통신 흐름을 다룬 외부 자료를 다시 보다가, 우리 구현이 표준 흐름의 한 단계를 통째로 건너뛰고 있다는 걸 발견했다.
+
+**실제 ONVIF 흐름**: WS-Discovery로 Device Service 주소를 얻고 → Device Service에 `GetCapabilities`를 호출해 Media/PTZ/Imaging 등 각 기능별 서비스 주소를 얻고 → 그 주소로 `GetProfiles`/`GetStreamUri`(Media), `RelativeMove`(PTZ), `Move`(Imaging)를 호출한다. 서비스별로 주소가 다를 수 있다는 게 핵심.
+
+**우리가 놓친 것**: `GetCapabilities` 호출 자체가 없었다. WS-Discovery로 받은 Device Service 주소를 Media/PTZ/Imaging 주소인 것처럼 그냥 재사용하고 있었다 — 우리 mock이 실제로 그렇게 동작하니 겉으로는 문제없이 돌아갔지만, "받은 주소를 따라간다"는 프로토콜의 핵심 동작 자체가 빠진 상태였다.
+
+**gSOAP은 안 씀**: 실무 ONVIF C++ 구현은 보통 gSOAP(`wsdl2h`/`soapcpp2`로 WSDL에서 코드 생성)을 쓰지만, 이 프로젝트 스코프("ONVIF 풀스펙 구현 안 함, 최소만")에는 새 빌드 툴체인을 들이는 게 과하다고 판단해 기존 Qt 기반 SOAP 조립 방식 그대로 `GetCapabilities` 단계만 추가했다.
+
+**수정**: `OnvifLiteClient`가 `GetDeviceInformation` 다음에 `GetCapabilities`를 호출해 Media/PTZ/Imaging XAddr을 각각 파싱하고, 이후 호출을 그 주소로 보내도록 변경. 검증을 위해 mock도 세 서비스 주소를 일부러 다른 경로(`/onvif/media_service`, `/onvif/ptz_service`, `/onvif/imaging_service`)로 응답하게 만들어서, 클라이언트가 실제로 그 주소를 따라가는지(하드코딩된 재사용이 아닌지) 확인했다.
 
 ---
 
@@ -88,6 +100,7 @@ Phase 2 착수 시점에 "PTZ 제어 API가 카메라 벤더마다 다 다른데
 - **서비스 인터페이스 유지 + 구현만 교체.** `DeviceService`/`CctvControlService`의 public 시그니처를 그대로 두고 내부 통신 대상만 서버 → 카메라로 바꿈으로써, 화면/미디어 계층(`DeviceCheckScreen`, `ChannelSessionManager`, `MainScreen` 등)을 한 줄도 건드리지 않고 백엔드를 교체했다.
 - **비동기 콜백 계약 보존.** 캐시로 응답을 앞당기면서도, 호출부(`mainwindow_auth.cpp`의 pending 카운터 패턴)가 "항상 비동기로 콜백이 온다"고 가정하고 있던 부분을 깨지 않기 위해 캐시 히트도 `QTimer::singleShot(0, ...)`으로 일관되게 비동기 디스패치했다.
 - **결정을 내리기 전에 실측하고 리서치했다.** "느려진 것 같다"는 감이 아니라 실제 호출 체인을 코드로 추적해 호출 횟수를 세고, ONVIF/SUNAPI 스펙을 조사해서 근거를 확보한 뒤에 아키텍처를 바꿨다.
+- **끝난 뒤에도 실제 스펙과 다시 비교했다.** Phase 1/2를 "완료"로 닫은 뒤에도 ONVIF 실제 흐름을 다룬 자료를 다시 읽다가 `GetCapabilities` 누락을 스스로 발견하고 되돌아가 고쳤다 — mock 기준으로는 이미 잘 동작하고 있었지만, "우리 mock에서만 통한다"와 "실제 스펙대로 동작한다"는 다르다고 판단했다.
 - **로그인 여부가 데이터 흐름을 가르지 않게.** 게스트 상태에서도 카메라 데이터 경로(디바이스 조회, RTSP)는 로그인 사용자와 동일하게 동작한다 — 로그인은 자격증명 동기화 같은 부가 기능에만 영향을 준다.
 
 ---
@@ -101,6 +114,7 @@ Phase 2 착수 시점에 "PTZ 제어 API가 카메라 벤더마다 다 다른데
 | 디바이스 2개·채널 2개 조회 시 HTTP/SOAP 호출 | 7~9회 (매 조회마다 재발생) | discovery+프로필 조회 1세트 (최초 1회), 이후 화면 조작은 캐시 응답 |
 | 채널 목록/상세 조회 | 별도 엔드포인트 2단계 | ONVIF `GetProfiles` 한 번으로 통합 |
 | zoom/focus 제어 | 서버 REST 프록시(POST+JSON body) | 서버 상태와 무관하게 카메라로 직접 ONVIF PTZ/Imaging SOAP |
+| ONVIF 서비스 주소 사용 | Device Service 주소를 Media/PTZ/Imaging에도 하드코딩 재사용 | `GetCapabilities`로 서비스별 실제 주소를 얻어 그 주소로 호출 |
 | 화면/미디어 계층 코드 | — | 무수정 (서비스 인터페이스 유지 원칙) |
 
 ---

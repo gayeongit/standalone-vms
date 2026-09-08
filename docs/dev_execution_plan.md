@@ -221,7 +221,26 @@ Phase 1 진입 전 결정에서는 control 와이어를 GET+query-param "CGI스�
 
 ---
 
+## Phase 1/2 사후 보정: GetCapabilities 누락 (2026-09-09)
+
+Phase 2 완료 후 사용자가 ONVIF 실제 흐름을 다룬 외부 글([onvif-introduction](https://pingu52.vercel.app/posts/embedded-system/protocol-security/onvif-introduction/), [onvif-ws-discovery](https://pingu52.vercel.app/posts/embedded-system/protocol-security/onvif-ws-discovery/))을 검토하다가, 우리 구현이 **`GetCapabilities` 단계를 완전히 스킵**하고 있다는 걸 발견했다.
+
+- **실제 ONVIF 흐름**: WS-Discovery → Device Service에서 `GetDeviceInformation`/`GetCapabilities` → `GetCapabilities` 응답의 Media(및 PTZ/Imaging) Service XAddr로 → `GetProfiles`/`GetStreamUri`(Media Service) / `RelativeMove`(PTZ Service) / `Move`(Imaging Service).
+- **우리가 스킵한 것**: `GetCapabilities`를 안 부르고, WS-Discovery로 받은 Device Service 주소를 Media/PTZ/Imaging 주소인 것처럼 그대로 재사용했음(Phase 1의 `GetProfiles`/`GetStreamUri`, Phase 2의 `RelativeMove`/`Move` 전부).
+- **gSOAP 사용 여부 논의**: 실무에서는 ONVIF C++ 구현 시 `wsdl2h`/`soapcpp2`로 코드를 생성하는 gSOAP이 표준이지만, 로드맵이 명시한 스코프("ONVIF 풀스펙 구현 안 함, Discovery/GetStreamUri/PTZ 최소만")에 비해 새 빌드 툴체인을 통째로 들이는 건 과함 — gSOAP 도입 없이 기존 Qt 기반 SOAP 문자열 조립 방식 그대로 `GetCapabilities` 단계만 추가하기로 결정.
+- **수정**:
+  - `OnvifLiteClient`: `GetDeviceInformation` 다음에 `GetCapabilities` 호출 추가. 응답에서 Media/PTZ/Imaging XAddr을 각각 파싱해 `DeviceProfilesResult`에 저장(`mediaXAddr`/`ptzXAddr`/`imagingXAddr`). 파싱 실패/누락 시 Device Service 주소로 폴백. 이후 `GetProfiles`/`GetStreamUri`는 `mediaXAddr`로 전송.
+  - `DeviceService`/`ChannelDetailResult`/`AppState`: 채널당 xaddr 하나(`onvifXAddr`/`channelOnvifXAddrById`)를 `onvifPtzXAddr`/`onvifImagingXAddr`(그리고 `channelOnvifPtzXAddrById`/`channelOnvifImagingXAddrById`) 두 개로 분리.
+  - `CctvControlService`: zoom은 PTZ XAddr, focus는 Imaging XAddr을 각각 조회해서 사용.
+  - `mock_camera_host/onvif_mock.cpp`: `GetCapabilities` 응답 추가 — Media/PTZ/Imaging XAddr을 같은 포트(8082), 다른 경로(`/onvif/media_service` 등)로 반환. 서버 자체는 경로 안 보고 액션 이름으로만 분기하지만, **클라이언트가 받은 주소를 실제로 그대로 써서 요청을 보내는지**는 검증됨(하드코딩된 재사용이 아님).
+- 빌드 확인: `VMS_v2`, `mock_camera_host` 둘 다 exit code 0.
+- **실행 재확인 완료 (2026-09-09, 사용자 확인).** `onvif_mock` 콘솔에 `GetCapabilities -> media=http://127.0.0.1:8082/onvif/media_service ptz=.../ptz_service imaging=.../imaging_service` 로그 확인, 이후 `GetProfiles`/`GetStreamUri`(profile_1/profile_2)/`RelativeMove`(zoom)/`Move`(focus) 전부 정상 동작.
+
+**상태: Phase 1/2 사후 보정 완료 (2026-09-09).**
+
+---
+
 ## 다음 Phase 메모
 
-- Phase 2 완료. 다음은 (3b/4는 순서 무관) → 5(선택) → 6.
-- Phase 3b(자격증명 캐시)는 Phase 2 논의 중 구체 설계(디바이스 트리 → 진입 전 ID/PW 모달 → 게스트 휘발성/회원 QtKeychain 영구)가 나왔음 — `docs/roadmap.md` Phase 3b 섹션 참고, 착수 시 이 문서에 세부 실행계획 이어서 작성.
+- Phase 2 완료(+사후 보정). 다음은 (3b/4는 순서 무관) → 5(선택) → 6.
+- Phase 3b(자격증명 캐시)는 Phase 2 논의 중 구체 설계(디바이스 트리 → 진입 전 ID/PW 모달 → 게스트 휘발성/회원 QtKeychain 영구)가 나왔음 — `docs/roadmap.md` Phase 3b 섹션 참고, 착수 시 이 문서에 세부 실행계획 이어서 작성. WS-Security(UsernameToken+password digest) 인증도 이때 gSOAP 없이 Qt `QCryptographicHash`로 직접 구현 가능함을 확인해둠 — 세션 토큰이 아니라 매 요청마다 nonce+timestamp로 새로 계산하는 방식.

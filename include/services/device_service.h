@@ -61,8 +61,9 @@ struct ChannelDetailResult
     QString name;
     QString rtsp;
     QString videoCodec;
-    QString onvifXAddr;       // device.source == "onvif"일 때만 채워짐 — PTZ/Imaging SOAP 대상 주소
-    QString onvifProfileToken; // device.source == "onvif"일 때만 채워짐 — RelativeMove/Move에 넘길 프로필 토큰
+    QString onvifPtzXAddr;     // device.source == "onvif"일 때만 채워짐 — RelativeMove(zoom) 대상 PTZ Service 주소
+    QString onvifImagingXAddr; // device.source == "onvif"일 때만 채워짐 — Move(focus) 대상 Imaging Service 주소
+    QString onvifProfileToken; // RelativeMove/Move에 넘길 프로필(비디오소스) 토큰
 };
 
 class DeviceService : public QObject

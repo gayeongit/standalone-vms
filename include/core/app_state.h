@@ -64,7 +64,8 @@ public:
     QHash<int, QString> channelRtspById;
     QHash<QString, QString> channelVideoCodecByName;
     QHash<int, QString> channelVideoCodecById;
-    QHash<int, QString> channelOnvifXAddrById;       // Phase 2: PTZ/Imaging SOAP 대상 주소
+    QHash<int, QString> channelOnvifPtzXAddrById;     // Phase 2: RelativeMove(zoom) 대상 PTZ Service 주소
+    QHash<int, QString> channelOnvifImagingXAddrById; // Phase 2: Move(focus) 대상 Imaging Service 주소
     QHash<int, QString> channelOnvifProfileTokenById; // Phase 2: RelativeMove/Move에 넘길 프로필 토큰
 
     void setGridCell(std::size_t index, const QString &displayName, int channelId, int deviceId)

@@ -163,7 +163,8 @@ void MainWindow::setupConnections()
         auto pending = QSharedPointer<int>::create(0);
         auto resolvedRtsp = QSharedPointer<QHash<QString, QString>>::create();
         auto resolvedCodecs = QSharedPointer<QHash<QString, QString>>::create();
-        auto resolvedOnvifXAddrs = QSharedPointer<QHash<QString, QString>>::create();
+        auto resolvedOnvifPtzXAddrs = QSharedPointer<QHash<QString, QString>>::create();
+        auto resolvedOnvifImagingXAddrs = QSharedPointer<QHash<QString, QString>>::create();
         auto resolvedOnvifProfileTokens = QSharedPointer<QHash<QString, QString>>::create();
         auto hadError = QSharedPointer<bool>::create(false);
         for (const auto &ctx : normalized) {
@@ -172,13 +173,14 @@ void MainWindow::setupConnections()
             }
         }
 
-        auto finalize = [this, showSettingsDialog, normalized, resolvedRtsp, resolvedCodecs, resolvedOnvifXAddrs, resolvedOnvifProfileTokens, hadError]() {
+        auto finalize = [this, showSettingsDialog, normalized, resolvedRtsp, resolvedCodecs, resolvedOnvifPtzXAddrs, resolvedOnvifImagingXAddrs, resolvedOnvifProfileTokens, hadError]() {
             auto &state = AppState::instance();
             state.channelRtspByName = *resolvedRtsp;
             state.channelRtspById.clear();
             state.channelVideoCodecByName = *resolvedCodecs;
             state.channelVideoCodecById.clear();
-            state.channelOnvifXAddrById.clear();
+            state.channelOnvifPtzXAddrById.clear();
+            state.channelOnvifImagingXAddrById.clear();
             state.channelOnvifProfileTokenById.clear();
 
             QVector<SelectedChannelContext> resolvedContexts;
@@ -197,9 +199,11 @@ void MainWindow::setupConnections()
                 if (ctx.channelId >= 0) {
                     state.channelRtspById.insert(ctx.channelId, state.channelRtspByName.value(name).trimmed());
                     state.channelVideoCodecById.insert(ctx.channelId, ctx.videoCodec);
-                    const QString onvifXAddr = resolvedOnvifXAddrs->value(name).trimmed();
-                    if (!onvifXAddr.isEmpty()) {
-                        state.channelOnvifXAddrById.insert(ctx.channelId, onvifXAddr);
+                    const QString onvifPtzXAddr = resolvedOnvifPtzXAddrs->value(name).trimmed();
+                    const QString onvifImagingXAddr = resolvedOnvifImagingXAddrs->value(name).trimmed();
+                    if (!onvifPtzXAddr.isEmpty() || !onvifImagingXAddr.isEmpty()) {
+                        state.channelOnvifPtzXAddrById.insert(ctx.channelId, onvifPtzXAddr);
+                        state.channelOnvifImagingXAddrById.insert(ctx.channelId, onvifImagingXAddr);
                         state.channelOnvifProfileTokenById.insert(ctx.channelId, resolvedOnvifProfileTokens->value(name).trimmed());
                     }
                 }
@@ -260,12 +264,13 @@ void MainWindow::setupConnections()
                 continue;
             }
             const QString displayName = ctx.displayName.trimmed();
-            m_deviceService->fetchChannelDetail(ctx.channelId, this, [this, pending, resolvedRtsp, resolvedCodecs, resolvedOnvifXAddrs, resolvedOnvifProfileTokens, hadError, displayName, finalize](const ChannelDetailResult &detail) {
+            m_deviceService->fetchChannelDetail(ctx.channelId, this, [this, pending, resolvedRtsp, resolvedCodecs, resolvedOnvifPtzXAddrs, resolvedOnvifImagingXAddrs, resolvedOnvifProfileTokens, hadError, displayName, finalize](const ChannelDetailResult &detail) {
                 if (detail.ok && !detail.rtsp.trimmed().isEmpty() && !displayName.isEmpty()) {
                     resolvedRtsp->insert(displayName, detail.rtsp.trimmed());
                     resolvedCodecs->insert(displayName, detail.videoCodec.trimmed());
-                    if (!detail.onvifXAddr.trimmed().isEmpty()) {
-                        resolvedOnvifXAddrs->insert(displayName, detail.onvifXAddr.trimmed());
+                    if (!detail.onvifPtzXAddr.trimmed().isEmpty() || !detail.onvifImagingXAddr.trimmed().isEmpty()) {
+                        resolvedOnvifPtzXAddrs->insert(displayName, detail.onvifPtzXAddr.trimmed());
+                        resolvedOnvifImagingXAddrs->insert(displayName, detail.onvifImagingXAddr.trimmed());
                         resolvedOnvifProfileTokens->insert(displayName, detail.onvifProfileToken.trimmed());
                     }
                 } else {
@@ -553,7 +558,8 @@ void MainWindow::clearAuthenticationState()
     state.selectedChannelContexts.clear();
     state.channelRtspByName.clear();
     state.channelRtspById.clear();
-    state.channelOnvifXAddrById.clear();
+    state.channelOnvifPtzXAddrById.clear();
+    state.channelOnvifImagingXAddrById.clear();
     state.channelOnvifProfileTokenById.clear();
     state.clearAllGridCells();
     state.activeChannel.clear();

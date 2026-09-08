@@ -29,6 +29,13 @@ const QString kDeviceServiceXAddr =
     QStringLiteral("http://127.0.0.1:%1/onvif/device_service").arg(kDeviceServicePort);
 const QString kDeviceUuid = QStringLiteral("urn:uuid:4b2a6b8e-0000-4000-8000-000000000001"); // 고정 더미 UUID
 
+// GetCapabilities가 알려주는 Media/PTZ/Imaging 서비스 주소. 실제로는 다른 포트/호스트일 수도 있지만
+// 이 mock은 같은 QTcpServer가 액션 이름으로만 분기하므로 경로만 구분해도 충분하다(설계 원칙 4) —
+// 클라이언트가 xaddr을 그대로 재사용하지 않고 여기서 받은 주소를 실제로 쓰는지 검증하는 게 목적.
+const QString kMediaServiceXAddr = QStringLiteral("http://127.0.0.1:%1/onvif/media_service").arg(kDeviceServicePort);
+const QString kPtzServiceXAddr = QStringLiteral("http://127.0.0.1:%1/onvif/ptz_service").arg(kDeviceServicePort);
+const QString kImagingServiceXAddr = QStringLiteral("http://127.0.0.1:%1/onvif/imaging_service").arg(kDeviceServicePort);
+
 struct MockProfile
 {
     QString token;
@@ -108,6 +115,17 @@ QByteArray buildGetDeviceInformationResponse()
         "<tds:Model>Phase1-Mock</tds:Model>"
         "<tds:SerialNumber>MOCK-0001</tds:SerialNumber>"
         "</tds:GetDeviceInformationResponse>"));
+}
+
+QByteArray buildGetCapabilitiesResponse()
+{
+    return wrapSoapEnvelope(
+        QStringLiteral("<tds:GetCapabilitiesResponse><tds:Capabilities>"
+                        "<tt:Media><tt:XAddr>%1</tt:XAddr></tt:Media>"
+                        "<tt:PTZ><tt:XAddr>%2</tt:XAddr></tt:PTZ>"
+                        "<tt:Imaging><tt:XAddr>%3</tt:XAddr></tt:Imaging>"
+                        "</tds:Capabilities></tds:GetCapabilitiesResponse>")
+            .arg(kMediaServiceXAddr, kPtzServiceXAddr, kImagingServiceXAddr));
 }
 
 QByteArray buildGetProfilesResponse()
@@ -206,6 +224,11 @@ QByteArray buildDeviceServiceResponse(const QByteArray &requestBody)
     if (requestBody.contains("GetDeviceInformation")) {
         qInfo().noquote() << "onvif_mock: GetDeviceInformation";
         return buildGetDeviceInformationResponse();
+    }
+    if (requestBody.contains("GetCapabilities")) {
+        qInfo().noquote() << "onvif_mock: GetCapabilities -> media=" << kMediaServiceXAddr
+                           << "ptz=" << kPtzServiceXAddr << "imaging=" << kImagingServiceXAddr;
+        return buildGetCapabilitiesResponse();
     }
     qWarning().noquote() << "onvif_mock: 처리 못한 device_service SOAP 요청";
     return wrapSoapEnvelope(QStringLiteral("<!-- unsupported action -->"));

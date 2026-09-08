@@ -7,8 +7,9 @@
 
 // Phase 2: zoom/focus는 서버 프록시를 거치지 않고 항상 카메라(ONVIF PTZ/Imaging)로 직접 간다.
 // 서버는 원래도 이 기능에 필수가 아니었음(카메라가 자체적으로 PTZ를 지원) — 서버 상태와 무관.
-// channelId -> ONVIF xaddr/profileToken 매핑은 Phase 1의 DeviceService가 discovery 시점에
-// AppState.channelOnvifXAddrById/channelOnvifProfileTokenById로 이미 채워둔다 (설계 원칙 1).
+// channelId -> ONVIF PTZ/Imaging xaddr·profileToken 매핑은 DeviceService가 discovery 시점에
+// GetCapabilities로 얻은 값을 AppState.channelOnvifPtzXAddrById/channelOnvifImagingXAddrById/
+// channelOnvifProfileTokenById로 이미 채워둔다 (설계 원칙 1).
 
 CctvControlService::CctvControlService(OnvifLiteClient *onvifClient, QObject *parent)
     : QObject(parent)
@@ -74,8 +75,10 @@ void CctvControlService::requestControl(
     }
 
     const auto &state = AppState::instance();
-    const QString xaddr = state.channelOnvifXAddrById.value(channelId).trimmed();
     const QString token = state.channelOnvifProfileTokenById.value(channelId).trimmed();
+    const QString xaddr = (kind == ControlKind::Zoom)
+        ? state.channelOnvifPtzXAddrById.value(channelId).trimmed()
+        : state.channelOnvifImagingXAddrById.value(channelId).trimmed();
     if (xaddr.isEmpty() || token.isEmpty()) {
         base.errorMessage = QStringLiteral("이 채널의 카메라 제어 주소를 찾을 수 없습니다.");
         if (callback) {

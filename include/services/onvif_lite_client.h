@@ -36,7 +36,10 @@ public:
         bool ok = false;
         QString errorMessage;
         QString uuid;
-        QString xaddr;
+        QString xaddr;      // Device Service (WS-Discovery로 얻은 원래 주소)
+        QString mediaXAddr;   // GetCapabilities로 얻은 Media Service 주소 (GetProfiles/GetStreamUri 대상)
+        QString ptzXAddr;     // GetCapabilities로 얻은 PTZ Service 주소
+        QString imagingXAddr; // GetCapabilities로 얻은 Imaging Service 주소
         QString ip;
         QString name;
         QString model;
