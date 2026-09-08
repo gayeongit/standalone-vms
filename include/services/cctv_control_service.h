@@ -6,17 +6,13 @@
 
 #include <functional>
 
-class RestClient;
-struct RestResponse;
+class OnvifLiteClient;
 
 struct CctvControlResult
 {
     bool ok = false;
-    int httpStatus = 0;
     int channelId = -1;
     int value = 0;
-    QString result;
-    QString errorCode;
     QString errorMessage;
 };
 
@@ -24,10 +20,7 @@ class CctvControlService : public QObject
 {
     Q_OBJECT
 public:
-    explicit CctvControlService(RestClient *restClient, QObject *parent = nullptr);
-
-    void setZoomPathTemplate(const QString &pathTemplate);
-    void setFocusPathTemplate(const QString &pathTemplate);
+    explicit CctvControlService(OnvifLiteClient *onvifClient, QObject *parent = nullptr);
 
     void zoomStep(int channelId, int value, QObject *context, std::function<void(const CctvControlResult &)> callback = {});
     void focusStep(int channelId, int value, QObject *context, std::function<void(const CctvControlResult &)> callback = {});
@@ -35,20 +28,15 @@ public:
     static bool isSupportedStepValue(int value);
 
 private:
+    enum class ControlKind { Zoom, Focus };
     void requestControl(
-        const QString &pathTemplate,
-        const QString &requestTag,
+        ControlKind kind,
         int channelId,
         int value,
         QObject *context,
         std::function<void(const CctvControlResult &)> callback);
-    QString resolvePathTemplate(const QString &pathTemplate, int channelId) const;
-    QString extractErrorCode(const RestResponse &response) const;
-    QString extractErrorMessage(const RestResponse &response, const QString &fallback) const;
 
-    RestClient *m_restClient = nullptr;
-    QString m_zoomPathTemplate = "/channel/{channelId}/zoom";
-    QString m_focusPathTemplate = "/channel/{channelId}/focus";
+    OnvifLiteClient *m_onvifClient = nullptr;
 };
 
 #endif // CCTV_CONTROL_SERVICE_H

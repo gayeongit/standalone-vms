@@ -163,6 +163,8 @@ void MainWindow::setupConnections()
         auto pending = QSharedPointer<int>::create(0);
         auto resolvedRtsp = QSharedPointer<QHash<QString, QString>>::create();
         auto resolvedCodecs = QSharedPointer<QHash<QString, QString>>::create();
+        auto resolvedOnvifXAddrs = QSharedPointer<QHash<QString, QString>>::create();
+        auto resolvedOnvifProfileTokens = QSharedPointer<QHash<QString, QString>>::create();
         auto hadError = QSharedPointer<bool>::create(false);
         for (const auto &ctx : normalized) {
             if (ctx.channelId >= 0) {
@@ -170,12 +172,14 @@ void MainWindow::setupConnections()
             }
         }
 
-        auto finalize = [this, showSettingsDialog, normalized, resolvedRtsp, resolvedCodecs, hadError]() {
+        auto finalize = [this, showSettingsDialog, normalized, resolvedRtsp, resolvedCodecs, resolvedOnvifXAddrs, resolvedOnvifProfileTokens, hadError]() {
             auto &state = AppState::instance();
             state.channelRtspByName = *resolvedRtsp;
             state.channelRtspById.clear();
             state.channelVideoCodecByName = *resolvedCodecs;
             state.channelVideoCodecById.clear();
+            state.channelOnvifXAddrById.clear();
+            state.channelOnvifProfileTokenById.clear();
 
             QVector<SelectedChannelContext> resolvedContexts;
             resolvedContexts.reserve(normalized.size());
@@ -193,6 +197,11 @@ void MainWindow::setupConnections()
                 if (ctx.channelId >= 0) {
                     state.channelRtspById.insert(ctx.channelId, state.channelRtspByName.value(name).trimmed());
                     state.channelVideoCodecById.insert(ctx.channelId, ctx.videoCodec);
+                    const QString onvifXAddr = resolvedOnvifXAddrs->value(name).trimmed();
+                    if (!onvifXAddr.isEmpty()) {
+                        state.channelOnvifXAddrById.insert(ctx.channelId, onvifXAddr);
+                        state.channelOnvifProfileTokenById.insert(ctx.channelId, resolvedOnvifProfileTokens->value(name).trimmed());
+                    }
                 }
                 resolvedContexts.push_back(ctx);
                 if (ctx.deviceType.trimmed().compare(QStringLiteral("CCTV"), Qt::CaseInsensitive) == 0) {
@@ -251,10 +260,14 @@ void MainWindow::setupConnections()
                 continue;
             }
             const QString displayName = ctx.displayName.trimmed();
-            m_deviceService->fetchChannelDetail(ctx.channelId, this, [this, pending, resolvedRtsp, resolvedCodecs, hadError, displayName, finalize](const ChannelDetailResult &detail) {
+            m_deviceService->fetchChannelDetail(ctx.channelId, this, [this, pending, resolvedRtsp, resolvedCodecs, resolvedOnvifXAddrs, resolvedOnvifProfileTokens, hadError, displayName, finalize](const ChannelDetailResult &detail) {
                 if (detail.ok && !detail.rtsp.trimmed().isEmpty() && !displayName.isEmpty()) {
                     resolvedRtsp->insert(displayName, detail.rtsp.trimmed());
                     resolvedCodecs->insert(displayName, detail.videoCodec.trimmed());
+                    if (!detail.onvifXAddr.trimmed().isEmpty()) {
+                        resolvedOnvifXAddrs->insert(displayName, detail.onvifXAddr.trimmed());
+                        resolvedOnvifProfileTokens->insert(displayName, detail.onvifProfileToken.trimmed());
+                    }
                 } else {
                     *hadError = true;
                 }
@@ -398,9 +411,7 @@ bool MainWindow::initializeAuthServices()
     m_deviceService->setChannelDetailPathTemplate(config.channelDetailPathTemplate);
     m_deviceService->setDeviceSource(config.deviceSource);
 
-    m_cctvControlService = new CctvControlService(m_restClient, this);
-    m_cctvControlService->setZoomPathTemplate(config.cctvZoomPathTemplate);
-    m_cctvControlService->setFocusPathTemplate(config.cctvFocusPathTemplate);
+    m_cctvControlService = new CctvControlService(m_onvifLiteClient, this);
 
     m_playbackService = new PlaybackService(m_restClient, this);
     m_playbackService->setChannelsByDatePathTemplate(config.playbackChannelsByDatePathTemplate);
@@ -542,6 +553,8 @@ void MainWindow::clearAuthenticationState()
     state.selectedChannelContexts.clear();
     state.channelRtspByName.clear();
     state.channelRtspById.clear();
+    state.channelOnvifXAddrById.clear();
+    state.channelOnvifProfileTokenById.clear();
     state.clearAllGridCells();
     state.activeChannel.clear();
     state.activeCctvChannelId = -1;

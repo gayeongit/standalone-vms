@@ -211,6 +211,8 @@ void DeviceService::fetchDevicesFromOnvif(
                                 detail.name = profile.name;
                                 detail.rtsp = profile.rtsp;
                                 detail.videoCodec = profile.videoCodec;
+                                detail.onvifXAddr = discovered.xaddr;
+                                detail.onvifProfileToken = profile.token;
                                 m_channelDetailCache.insert(channelId, detail);
                             }
                         } else {

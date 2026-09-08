@@ -46,7 +46,7 @@ VMS 실행 → 로그인 → 서버 인증 → 서버가 등록한 CCTV 조회 �
                 Qt VMS (v2)
         ┌─────────────────────────┐
         │ DeviceService (신규 입구) │──ONVIF-lite SOAP──▶ 목업 호스트(로컬 PC) (onvif_srvd 등)
-        │ CctvControlService       │──HTTP CGI──────────▶ 목업 호스트(로컬 PC) (zoom/focus/PTZ mock)
+        │ CctvControlService       │──ONVIF PTZ/Imaging SOAP──▶ 목업 호스트(로컬 PC) (zoom/focus mock)
         │ 신규: LocalEventListener │◀─UDP broadcast──────  목업 호스트(로컬 PC) (더미 이벤트 송신)
         │ PlaybackService(신규 경로)│──HTTP + mediamtx────▶ 목업 호스트(로컬 PC) + mediamtx (더미 영상)
         └─────────────────────────┘
@@ -98,9 +98,9 @@ RPi를 당장 쓸 수 없는 상황이라 Phase 0(RPi 테스트 베드)부터 �
 |---|---|---|---|
 | 0 | 목업 카메라 호스트 구축 (로컬 PC) | 없음 | 완료 (2026-09-08) |
 | 1 | 카메라 자동 탐색 (ONVIF-lite Discovery) | Phase 0 | 완료 (2026-09-08) |
-| 2 | CctvControlService 직접 제어 전환 | Phase 1 | **대기 (다음 작업)** |
+| 2 | CctvControlService 직접 제어 전환 | Phase 1 | 완료 (2026-09-09) |
 | 3a | 로그인/게스트 분기 (카메라 무관) | 없음 | 완료 (2026-09-03) |
-| 3b | 로컬 자격증명 캐시 | Phase 1 | 대기 |
+| 3b | 로컬 자격증명 캐시 | Phase 1 | **대기 (다음 작업)** |
 | 4 | 이벤트 직접 수신 경로 | Phase 0 | 대기 |
 | 5 | Playback (mediamtx 기반, 더미 콘텐츠) | Phase 1 | 대기 (선택) |
 | 6 | 통합 검증 + 문서 정리 (UGV 등 미사용 코드 최종 정리 포함) | 전체 | 대기 |
@@ -138,14 +138,26 @@ Phase 3b, 4는 서로 독립적이라 순서 바꿔도 무방. Phase 5는 시간
 
 ---
 
-### Phase 2 — CctvControlService 전환
+### Phase 2 — CctvControlService 전환 (완료)
 
-**하려는 것.** zoom/focus/PTZ 요청이 서버 프록시 없이 목업 호스트 CGI로 직접 가게.
+**하려는 것.** zoom/focus 요청이 서버 프록시 없이 카메라(목업)로 직접 가게.
 
+**결정 변경 (2026-09-09).** 처음엔 "HTTP CGI" 방식(Phase 0의 `cgi_mock.cpp`, POST+JSON body)으로 계획했으나 재검토 후 **ONVIF PTZ/Imaging SOAP**으로 변경. 이유:
+- PTZ CGI는 벤더마다 형식이 다 다름(한화 SUNAPI/Axis VAPIX/Dahua 등 서로 호환 안 됨) — "우리만 아는 방언"을 만드는 것과 다름없음.
+- ONVIF는 PTZ(`RelativeMove`)/Imaging(`Move`) 서비스가 표준화돼 있어 ONVIF Profile S를 지원하는 실제 카메라와도 호환됨.
+- 지금 UI는 "누르면 한 스텝"(-100~100 discrete) 방식이라 `ContinuousMove`(누르고 있는 동안 계속)보다 `RelativeMove`/Imaging `Move`(Relative, 정해진 만큼 이동 후 정지)가 정확히 맞음.
+- Phase 1에서 만든 `OnvifLiteClient`의 SOAP 전송 인프라를 그대로 재사용 가능.
+
+작업:
+- `zoomStep(channelId, value)` → PTZ `RelativeMove` (value/100을 Zoom 축 상대 이동량으로 변환)
+- `focusStep(channelId, value)` → Imaging `Move` (Relative)
 - 기존 step 검증 로직(-100~100) 유지
-- base URL만 서버 → 목업 호스트로 교체 (설정 가능하게)
+- `channelId` → ONVIF `xaddr`/profile token 매핑을 `DeviceService` 내부에서 `AppState`로 노출(설계 원칙 1) — `CctvControlService`가 이걸 읽어서 SOAP 대상 결정. 별도 base URL 설정 불필요(discovery 때 이미 알아낸 주소 재사용)
+- `cgi_mock.cpp`(Phase 0에서 만든 CGI mock)는 이번 Phase에서 안 씀 — 삭제하지 않고 남겨두되, 최종 정리는 Phase 6에서
 
-**확인할 것.** `CctvScreen`에서 zoom/focus 조작 시 목업 호스트가 OK 응답, UI 상태라벨 정상 반영.
+**확인할 것.** `CctvScreen`에서 zoom/focus 조작 시 목업 호스트(`onvif_mock`)가 OK로 응답, UI 상태라벨 정상 반영.
+
+**상태.** 완료 (2026-09-09) — `onvif_mock` 콘솔에 `PTZ RelativeMove`/`Imaging Move` 로그로 step 값(±1/±10/±100 → ±0.01/±0.1/±1.0) 정확한 스케일링 확인. 세부 내용은 `docs/dev_execution_plan.md`의 Phase 2 섹션 참고.
 
 ---
 
@@ -169,11 +181,16 @@ Phase 3b, 4는 서로 독립적이라 순서 바꿔도 무방. Phase 5는 시간
 
 **하려는 것.** 카메라별 자격증명은 로컬(QtKeychain)에 캐시. 실제 카메라 연결이 전제이므로 Phase 1 완료 후 진행.
 
-- 최초 연결 시 카메라 ID/PW 입력 → QtKeychain 저장
-- 이후 재연결 시 자동 사용
+**구체 흐름 (2026-09-09, Phase 2 작업 중 설계 논의에서 정리)**
+
+- `DeviceCheckScreen`의 디바이스→채널 트리는 이미 discovery(Phase 1) 결과 기반으로 존재 — 무수정.
+- 채널 선택 → "VMS 시작" 눌러서 Main 진입하기 **전**, 아직 자격증명이 캐시되지 않은 장치가 있으면 장치별 ID/PW 입력 모달을 띄운다.
+- 입력받은 자격증명은 이후 그 장치를 대상으로 하는 카메라 제어 요청(zoom/focus 등 PTZ, Phase 2에서 ONVIF SOAP으로 전환됨)에 사용한다.
+- **게스트 모드**: 자격증명은 휘발성 — 앱을 재시작하거나 로그인 화면으로 돌아가면 다시 입력해야 함.
+- **로그인 상태**: QtKeychain에 영구 저장 — 한 번 입력한 장치는 이후 재연결 시 자동 사용, 최초 연결 장치만 입력 필요.
 - 로그인한 경우 서버 동기화는 선택적 계층으로 유지 (기존 `AuthService` 그대로 활용)
 
-**확인할 것.** 게스트로 로그인 없이 카메라 접속·재접속(비번 재입력 없음) 확인.
+**확인할 것.** 게스트로 로그인 없이 카메라 접속 시 매번 재입력 필요, 로그인 상태에서는 최초 1회만 입력하고 재접속 시 비번 재입력 없음.
 
 ---
 

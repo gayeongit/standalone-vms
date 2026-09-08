@@ -63,6 +63,22 @@ public:
 
     void invalidate();
 
+    // PTZ RelativeMove — zoomDelta는 정규화된 상대 이동량(-1.0~1.0 권장). Pan/Tilt는 안 씀(zoom만 조작).
+    void relativeMove(
+        const QString &xaddr,
+        const QString &profileToken,
+        double zoomDelta,
+        QObject *context,
+        std::function<void(bool ok, const QString &errorMessage)> callback);
+
+    // Imaging Move(Relative) — focusDelta도 정규화된 상대 이동량.
+    void imagingRelativeMove(
+        const QString &xaddr,
+        const QString &videoSourceToken,
+        double focusDelta,
+        QObject *context,
+        std::function<void(bool ok, const QString &errorMessage)> callback);
+
 private:
     void postSoap(
         const QString &xaddr,

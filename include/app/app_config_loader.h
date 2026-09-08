@@ -19,8 +19,6 @@ struct AppConfig {
     QString deviceSource = "onvif"; // "onvif" | "server"
     int onvifDiscoveryTimeoutMs = 1500;
     QString onvifManualXAddr;
-    QString cctvZoomPathTemplate = "/channel/{channelId}/zoom";
-    QString cctvFocusPathTemplate = "/channel/{channelId}/focus";
     QString playbackChannelsByDatePathTemplate = "/playback/dates/{date}/channels";
     QString playbackTimelinePath = "/playback/timeline";
     QString playbackStreamPath = "/playback/stream";

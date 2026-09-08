@@ -187,7 +187,41 @@ Phase 1 착수 전, 기존 서버 REST API 형식을 그대로 카메라/목업 
 
 ---
 
+## Phase 2. CctvControlService 직접 제어 전환
+
+### 진입 전 결정 (2026-09-09) — GET+query-param CGI에서 ONVIF PTZ/Imaging으로 재변경
+
+Phase 1 진입 전 결정에서는 control 와이어를 GET+query-param "CGI스러운" 스타일로 가기로 했었으나, Phase 2 착수 논의 중 재검토해서 뒤집었다.
+
+- **왜 CGI를 버렸나**: PTZ CGI는 벤더마다 형식이 전부 다름(한화 SUNAPI/Axis VAPIX/Dahua 등 서로 호환 안 됨). 우리가 만든 GET+query-param 방식도 실제로는 아무 카메라도 안 쓰는 "우리만의 방언"이라 범용성이 없었다.
+- **왜 ONVIF인가**: ONVIF PTZ(`RelativeMove`)/Imaging(`Move`) 서비스는 Profile S 카메라라면 공통으로 지원하는 표준. Phase 1에서 이미 discovery를 ONVIF-lite로 만들어놨으니 같은 프로토콜 계열로 가는 게 일관성 있음.
+- **왜 `RelativeMove`(Continuous 아님)**: 현재 UI는 "누르면 -100~100 중 하나의 스텝만큼 이동"하는 discrete 방식이라, "누르고 있는 동안 계속 이동"하는 `ContinuousMove`보다 "정해진 양만큼 이동 후 정지"하는 `RelativeMove`/Imaging `Move`(Relative)가 정확히 맞아떨어짐. 별도의 "일정 시간 후 정지" 타이머 로직이 필요 없음.
+- **`cctv.source`(서버/카메라 토글) 도입 안 함**: 처음엔 Phase 1의 `device.source`처럼 토글을 만들려고 했으나, Phase 2 로드맵 원문("base URL만 서버 → 목업 호스트로 **교체**")을 다시 보면 이건 "서버냐 카메라냐 고르는 토글"이 아니라 "카메라 주소가 바뀔 수 있다"는 뜻이었음. 애초에 zoom/focus는 카메라가 이미 직접 지원하는 기능이라 서버가 필요한 적이 없었고, 서버 상태와 무관하게 항상 카메라로 가는 게 리팩토링 목적(서버 의존성 제거)에 맞음. `device.source`가 토글인 건 Phase 1 로드맵 원문이 실제로 "서버 있음/없음에 따라 분기"라고 명시했기 때문 — Phase 2와는 원문 자체가 다름.
+- **Phase 3b(자격증명 캐시)와의 관계**: 실제 ONVIF 카메라는 PTZ 요청에 인증이 필요하지만, 지금 mock(`onvif_mock`)은 인증을 검사하지 않으므로 Phase 2는 자격증명 없이도 mock 대상으로 완전히 동작한다. Phase 3b(장치별 ID/PW 모달 + QtKeychain, 게스트=휘발성/회원=영구 저장)는 의도적으로 분리해서 나중에 진행 — 세부 설계는 `docs/roadmap.md` Phase 3b 섹션에 정리해둠.
+- **`cgi_mock.cpp`(Phase 0)**: 이번 Phase에서 안 씀. 삭제하지 않고 남겨두고 최종 정리는 Phase 6에서.
+
+### 작업 범위 (예정)
+
+- `include/services/onvif_lite_client.h/.cpp`: `relativeMove(xaddr, profileToken, zoomDelta, context, callback)`(PTZ), `imagingRelativeMove(xaddr, videoSourceToken, focusDelta, context, callback)`(Imaging) 추가. 기존 `postSoap` 재사용.
+- `include/services/device_service.h/.cpp`의 `ChannelDetailResult`: `onvifXAddr`/`onvifProfileToken` 필드 추가, `fetchDevicesFromOnvif`에서 캐싱 시 같이 채움.
+- `include/core/app_state.h`: `channelOnvifXAddrById`/`channelOnvifProfileTokenById`(`QHash<int, QString>`) 추가 — 설계 원칙 1(AppState를 접점으로) 적용.
+- `src/app/mainwindow_auth.cpp`의 `finalize()`: `fetchChannelDetail` 콜백에서 위 두 필드를 AppState 맵에 채움 (`channelRtspById` 채우는 자리 옆에).
+- `include/services/cctv_control_service.h/.cpp`: `OnvifLiteClient*` 의존성 추가(생성자 확장), `requestControl` 내부를 `AppState`에서 xaddr/token 조회 → `OnvifLiteClient`의 새 메서드 호출로 교체. `zoomStep`/`focusStep`/`isSupportedStepValue` 시그니처는 무변경.
+- `src/app/mainwindow_auth.cpp`의 `initializeAuthServices()`: `CctvControlService` 생성자에 `m_onvifLiteClient` 추가 주입.
+- `mock_camera_host/onvif_mock.cpp`: device_service SOAP 디스패처에 `RelativeMove`(PTZ)/`Move`(Imaging) 액션 처리 추가 — 로그만 찍고 빈 성공 응답 반환(설계 원칙 4, mock은 정교할 필요 없음).
+- `CctvScreen`: 무수정.
+
+### 완료 기준 / 게이트 테스트
+
+- [x] 빌드 성공 (VMS_v2, mock_camera_host 둘 다 exit code 0)
+- [x] `CctvScreen`에서 zoom/focus 조작 시 `onvif_mock` 콘솔에 RelativeMove/Move 로그 확인 (사용자 확인, 2026-09-09) — `PTZ RelativeMove token=profile_1 zoom=0.0100/0.1000/1.0000`, `Imaging Move token=profile_1 focus=-0.1000/-1.0000/0.0100` 등. step 값(±1/±10/±100)이 정확히 ±0.01/±0.1/±1.0로 스케일링됨 확인
+- [x] 지원하지 않는 step 값(-100~100 외) 클라이언트 차단 — `isSupportedStepValue` 로직 자체는 무변경이라 코드 리뷰로 확인 (별도 실행 테스트 불필요)
+
+**상태: Phase 2 완료 (2026-09-09).** `CctvControlService`가 서버 프록시 없이 ONVIF PTZ(`RelativeMove`)/Imaging(`Move`)로 카메라(목업)에 직접 zoom/focus. `cgi_mock.cpp`는 이번 Phase에서 안 씀(Phase 6에서 최종 정리 판단), 관련 REST path 설정(`cctv.zoomPath`/`focusPath`, `setZoomPathTemplate`/`setFocusPathTemplate`)도 같이 제거.
+
+---
+
 ## 다음 Phase 메모
 
-- Phase 1 완료. 다음은 Phase 2(CctvControlService 직접 제어 전환) — 착수 시 이 문서에 세부 실행계획 섹션을 이어서 추가한다. control 와이어 포맷을 GET+query-param 스타일로 전환하기로 이미 결정됨(Phase 1 진입 전 결정 참고) — `cgi_mock.cpp`/`CctvControlService`를 같이 고친다.
-- 이후 Phase 2 → (3b/4는 순서 무관) → 5(선택) → 6 순으로 진행.
+- Phase 2 완료. 다음은 (3b/4는 순서 무관) → 5(선택) → 6.
+- Phase 3b(자격증명 캐시)는 Phase 2 논의 중 구체 설계(디바이스 트리 → 진입 전 ID/PW 모달 → 게스트 휘발성/회원 QtKeychain 영구)가 나왔음 — `docs/roadmap.md` Phase 3b 섹션 참고, 착수 시 이 문서에 세부 실행계획 이어서 작성.

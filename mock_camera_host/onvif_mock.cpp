@@ -129,12 +129,25 @@ QByteArray buildGetProfilesResponse()
         QStringLiteral("<trt:GetProfilesResponse>%1</trt:GetProfilesResponse>").arg(profilesXml));
 }
 
-QString extractProfileToken(const QByteArray &requestBody)
+QString extractElementText(const QByteArray &requestBody, const QString &tagLocalName)
 {
-    static const QRegularExpression pattern(
-        QStringLiteral("<[^>]*ProfileToken[^>]*>([^<]*)</[^>]*ProfileToken>"));
+    const QRegularExpression pattern(
+        QStringLiteral("<[^:>]*:?%1[^>]*>([^<]*)</[^:>]*:?%1>").arg(tagLocalName));
     const auto match = pattern.match(QString::fromUtf8(requestBody));
     return match.hasMatch() ? match.captured(1).trimmed() : QString();
+}
+
+QString extractAttributeValue(const QByteArray &requestBody, const QString &tagLocalName, const QString &attributeName)
+{
+    const QRegularExpression pattern(
+        QStringLiteral("<[^:>]*:?%1\\b[^>]*\\s%2=\"([^\"]*)\"").arg(tagLocalName, attributeName));
+    const auto match = pattern.match(QString::fromUtf8(requestBody));
+    return match.hasMatch() ? match.captured(1).trimmed() : QString();
+}
+
+QString extractProfileToken(const QByteArray &requestBody)
+{
+    return extractElementText(requestBody, QStringLiteral("ProfileToken"));
 }
 
 QByteArray buildGetStreamUriResponse(const QString &profileToken)
@@ -155,8 +168,32 @@ QByteArray buildGetStreamUriResponse(const QString &profileToken)
             .arg(uri));
 }
 
+QByteArray buildRelativeMoveResponse(const QString &profileToken, const QString &zoomDelta)
+{
+    qInfo().noquote() << "onvif_mock: PTZ RelativeMove token=" << profileToken << "zoom=" << zoomDelta;
+    return wrapSoapEnvelope(QStringLiteral("<tptz:RelativeMoveResponse/>"));
+}
+
+QByteArray buildImagingMoveResponse(const QString &videoSourceToken, const QString &focusDelta)
+{
+    qInfo().noquote() << "onvif_mock: Imaging Move token=" << videoSourceToken << "focus=" << focusDelta;
+    return wrapSoapEnvelope(QStringLiteral("<timg:MoveResponse/>"));
+}
+
 QByteArray buildDeviceServiceResponse(const QByteArray &requestBody)
 {
+    // Phase 2: PTZ RelativeMove / Imaging Move. "RelativeMove"가 먼저 걸리게 순서에 주의
+    // (둘 다 문자열 "Move"를 포함하므로 Imaging은 VideoSourceToken 존재로 구분).
+    if (requestBody.contains("RelativeMove")) {
+        const QString token = extractElementText(requestBody, QStringLiteral("ProfileToken"));
+        const QString zoom = extractAttributeValue(requestBody, QStringLiteral("Zoom"), QStringLiteral("x"));
+        return buildRelativeMoveResponse(token, zoom);
+    }
+    if (requestBody.contains("VideoSourceToken")) {
+        const QString token = extractElementText(requestBody, QStringLiteral("VideoSourceToken"));
+        const QString distance = extractElementText(requestBody, QStringLiteral("Distance"));
+        return buildImagingMoveResponse(token, distance);
+    }
     if (requestBody.contains("GetStreamUri")) {
         const QString token = extractProfileToken(requestBody);
         qInfo().noquote() << "onvif_mock: GetStreamUri token=" << token;

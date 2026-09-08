@@ -51,6 +51,33 @@ QByteArray buildGetStreamUriRequest(const QString &profileToken)
             .arg(profileToken));
 }
 
+QByteArray buildRelativeMoveRequest(const QString &profileToken, double zoomDelta)
+{
+    return wrapSoapRequest(
+        QStringLiteral("<tptz:RelativeMove xmlns:tptz=\"http://www.onvif.org/ver20/ptz/wsdl\">"
+                        "<tptz:ProfileToken>%1</tptz:ProfileToken>"
+                        "<tptz:Translation>"
+                        "<tt:PanTilt xmlns:tt=\"http://www.onvif.org/ver10/schema\" x=\"0\" y=\"0\"/>"
+                        "<tt:Zoom xmlns:tt=\"http://www.onvif.org/ver10/schema\" x=\"%2\"/>"
+                        "</tptz:Translation>"
+                        "</tptz:RelativeMove>")
+            .arg(profileToken, QString::number(zoomDelta, 'f', 4)));
+}
+
+QByteArray buildImagingMoveRequest(const QString &videoSourceToken, double focusDelta)
+{
+    return wrapSoapRequest(
+        QStringLiteral("<timg:Move xmlns:timg=\"http://www.onvif.org/ver20/imaging/wsdl\">"
+                        "<timg:VideoSourceToken>%1</timg:VideoSourceToken>"
+                        "<timg:Focus>"
+                        "<timg:Relative xmlns:tt=\"http://www.onvif.org/ver10/schema\">"
+                        "<tt:Distance>%2</tt:Distance>"
+                        "</timg:Relative>"
+                        "</timg:Focus>"
+                        "</timg:Move>")
+            .arg(videoSourceToken, QString::number(focusDelta, 'f', 4)));
+}
+
 QByteArray buildProbeRequest()
 {
     const QString messageId = QStringLiteral("uuid:") + QUuid::createUuid().toString(QUuid::WithoutBraces);
@@ -288,6 +315,44 @@ void OnvifLiteClient::fetchStreamUrisSequentially(
                 result.profiles[index].rtsp = extractSingleValue(QString::fromUtf8(body), QStringLiteral("Uri"));
             }
             fetchStreamUrisSequentially(result, index + 1, context, callback);
+        });
+}
+
+void OnvifLiteClient::relativeMove(
+    const QString &xaddr,
+    const QString &profileToken,
+    double zoomDelta,
+    QObject *context,
+    std::function<void(bool ok, const QString &errorMessage)> callback)
+{
+    if (!callback) {
+        return;
+    }
+    postSoap(
+        xaddr,
+        buildRelativeMoveRequest(profileToken, zoomDelta),
+        context,
+        [callback](bool ok, const QByteArray & /*responseBody*/, const QString &errorMessage) {
+            callback(ok, errorMessage);
+        });
+}
+
+void OnvifLiteClient::imagingRelativeMove(
+    const QString &xaddr,
+    const QString &videoSourceToken,
+    double focusDelta,
+    QObject *context,
+    std::function<void(bool ok, const QString &errorMessage)> callback)
+{
+    if (!callback) {
+        return;
+    }
+    postSoap(
+        xaddr,
+        buildImagingMoveRequest(videoSourceToken, focusDelta),
+        context,
+        [callback](bool ok, const QByteArray & /*responseBody*/, const QString &errorMessage) {
+            callback(ok, errorMessage);
         });
 }
 

@@ -1,83 +1,19 @@
 #include "cctv_control_service.h"
 
-#include "rest_client.h"
+#include "app_state.h"
+#include "onvif_lite_client.h"
 
-#include <QJsonObject>
-#include <QJsonValue>
 #include <QSet>
 
-namespace {
+// Phase 2: zoom/focus는 서버 프록시를 거치지 않고 항상 카메라(ONVIF PTZ/Imaging)로 직접 간다.
+// 서버는 원래도 이 기능에 필수가 아니었음(카메라가 자체적으로 PTZ를 지원) — 서버 상태와 무관.
+// channelId -> ONVIF xaddr/profileToken 매핑은 Phase 1의 DeviceService가 discovery 시점에
+// AppState.channelOnvifXAddrById/channelOnvifProfileTokenById로 이미 채워둔다 (설계 원칙 1).
 
-QString jsonString(const QJsonValue &value)
-{
-    if (value.isString()) {
-        return value.toString().trimmed();
-    }
-    if (value.isDouble()) {
-        return QString::number(value.toVariant().toLongLong());
-    }
-    return {};
-}
-
-QString nestedErrorCode(const QJsonObject &root)
-{
-    const QString directCode = jsonString(root.value(QStringLiteral("code")));
-    if (!directCode.isEmpty()) {
-        return directCode;
-    }
-    const QJsonValue errorValue = root.value(QStringLiteral("error"));
-    if (errorValue.isString()) {
-        return errorValue.toString().trimmed();
-    }
-    if (errorValue.isObject()) {
-        return jsonString(errorValue.toObject().value(QStringLiteral("code")));
-    }
-    return {};
-}
-
-QString nestedMessage(const QJsonObject &root)
-{
-    const QString directMessage = jsonString(root.value(QStringLiteral("message")));
-    if (!directMessage.isEmpty()) {
-        return directMessage;
-    }
-    const QJsonValue errorValue = root.value(QStringLiteral("error"));
-    if (errorValue.isString()) {
-        return errorValue.toString().trimmed();
-    }
-    if (errorValue.isObject()) {
-        const QJsonObject errorObject = errorValue.toObject();
-        const QString errorMessage = jsonString(errorObject.value(QStringLiteral("message")));
-        if (!errorMessage.isEmpty()) {
-            return errorMessage;
-        }
-        return jsonString(errorObject.value(QStringLiteral("code")));
-    }
-    return {};
-}
-
-} // namespace
-
-CctvControlService::CctvControlService(RestClient *restClient, QObject *parent)
+CctvControlService::CctvControlService(OnvifLiteClient *onvifClient, QObject *parent)
     : QObject(parent)
-    , m_restClient(restClient)
+    , m_onvifClient(onvifClient)
 {
-}
-
-void CctvControlService::setZoomPathTemplate(const QString &pathTemplate)
-{
-    const QString trimmed = pathTemplate.trimmed();
-    if (!trimmed.isEmpty()) {
-        m_zoomPathTemplate = trimmed;
-    }
-}
-
-void CctvControlService::setFocusPathTemplate(const QString &pathTemplate)
-{
-    const QString trimmed = pathTemplate.trimmed();
-    if (!trimmed.isEmpty()) {
-        m_focusPathTemplate = trimmed;
-    }
 }
 
 void CctvControlService::zoomStep(
@@ -86,7 +22,7 @@ void CctvControlService::zoomStep(
     QObject *context,
     std::function<void(const CctvControlResult &)> callback)
 {
-    requestControl(m_zoomPathTemplate, QStringLiteral("cctv_zoom"), channelId, value, context, std::move(callback));
+    requestControl(ControlKind::Zoom, channelId, value, context, std::move(callback));
 }
 
 void CctvControlService::focusStep(
@@ -95,7 +31,7 @@ void CctvControlService::focusStep(
     QObject *context,
     std::function<void(const CctvControlResult &)> callback)
 {
-    requestControl(m_focusPathTemplate, QStringLiteral("cctv_focus"), channelId, value, context, std::move(callback));
+    requestControl(ControlKind::Focus, channelId, value, context, std::move(callback));
 }
 
 bool CctvControlService::isSupportedStepValue(int value)
@@ -105,8 +41,7 @@ bool CctvControlService::isSupportedStepValue(int value)
 }
 
 void CctvControlService::requestControl(
-    const QString &pathTemplate,
-    const QString &requestTag,
+    ControlKind kind,
     int channelId,
     int value,
     QObject *context,
@@ -124,14 +59,13 @@ void CctvControlService::requestControl(
         return;
     }
     if (!isSupportedStepValue(value)) {
-        base.errorCode = QStringLiteral("INVALID_ARGUMENT");
         base.errorMessage = QStringLiteral("지원하지 않는 제어 값입니다.");
         if (callback) {
             callback(base);
         }
         return;
     }
-    if (!m_restClient) {
+    if (!m_onvifClient) {
         base.errorMessage = QStringLiteral("CctvControlService가 초기화되지 않았습니다.");
         if (callback) {
             callback(base);
@@ -139,68 +73,39 @@ void CctvControlService::requestControl(
         return;
     }
 
-    QJsonObject body;
-    body.insert(QStringLiteral("value"), value);
-
-    m_restClient->postJson(
-        resolvePathTemplate(pathTemplate, channelId),
-        body,
-        requestTag,
-        false,
-        context ? context : this,
-        [this, callback = std::move(callback), channelId, value](const RestResponse &response) mutable {
-            CctvControlResult result;
-            result.ok = response.ok;
-            result.httpStatus = response.httpStatus;
-            result.channelId = channelId;
-            result.value = value;
-            result.errorCode = extractErrorCode(response);
-            result.errorMessage = extractErrorMessage(response, QStringLiteral("CCTV 제어 요청에 실패했습니다."));
-
-            const QJsonObject dataObject = response.json.value(QStringLiteral("data")).toObject();
-            result.result = jsonString(dataObject.value(QStringLiteral("result")));
-            if (result.result.isEmpty()) {
-                result.result = jsonString(response.json.value(QStringLiteral("result")));
-            }
-
-            if (callback) {
-                callback(result);
-            }
-        });
-}
-
-QString CctvControlService::resolvePathTemplate(const QString &pathTemplate, int channelId) const
-{
-    QString path = pathTemplate.trimmed();
-    path.replace(QStringLiteral("{channelId}"), QString::number(channelId));
-    return path;
-}
-
-QString CctvControlService::extractErrorCode(const RestResponse &response) const
-{
-    return nestedErrorCode(response.json);
-}
-
-QString CctvControlService::extractErrorMessage(const RestResponse &response, const QString &fallback) const
-{
-    const QString message = nestedMessage(response.json);
-    if (!message.isEmpty()) {
-        return message;
+    const auto &state = AppState::instance();
+    const QString xaddr = state.channelOnvifXAddrById.value(channelId).trimmed();
+    const QString token = state.channelOnvifProfileTokenById.value(channelId).trimmed();
+    if (xaddr.isEmpty() || token.isEmpty()) {
+        base.errorMessage = QStringLiteral("이 채널의 카메라 제어 주소를 찾을 수 없습니다.");
+        if (callback) {
+            callback(base);
+        }
+        return;
     }
-    if (!response.errorMessage.trimmed().isEmpty()) {
-        return response.errorMessage.trimmed();
+
+    // ONVIF 정규화 공간(-1.0~1.0)에 맞춰 -100~100 step을 스케일링.
+    const double delta = value / 100.0;
+
+    auto onDone = [callback, channelId, value](bool ok, const QString &errorMessage) {
+        if (!callback) {
+            return;
+        }
+        CctvControlResult result;
+        result.ok = ok;
+        result.channelId = channelId;
+        result.value = value;
+        if (!ok) {
+            const QString trimmed = errorMessage.trimmed();
+            result.errorMessage = trimmed.isEmpty() ? QStringLiteral("CCTV 제어 요청에 실패했습니다.") : trimmed;
+        }
+        callback(result);
+    };
+
+    QObject *effectiveContext = context ? context : this;
+    if (kind == ControlKind::Zoom) {
+        m_onvifClient->relativeMove(xaddr, token, delta, effectiveContext, onDone);
+    } else {
+        m_onvifClient->imagingRelativeMove(xaddr, token, delta, effectiveContext, onDone);
     }
-    if (response.httpStatus == 400) {
-        return QStringLiteral("제어 값이 올바르지 않습니다.");
-    }
-    if (response.httpStatus == 404) {
-        return QStringLiteral("채널을 찾을 수 없습니다.");
-    }
-    if (response.httpStatus == 409) {
-        return QStringLiteral("장치 상태로 인해 제어를 수행할 수 없습니다.");
-    }
-    if (response.httpStatus >= 500) {
-        return QStringLiteral("서버 오류로 CCTV 제어에 실패했습니다.");
-    }
-    return fallback;
 }

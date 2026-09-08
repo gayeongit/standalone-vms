@@ -56,6 +56,7 @@ cmake --build build
 - Phase 3a(로그인/게스트 분기, 카메라 무관) 완료 (2026-09-03)
 - Phase 0(목업 카메라 호스트 구축, 로컬 PC) 완료 (2026-09-08) — `mock_camera_host/`에 C++/Qt로 ONVIF-lite mock/CGI mock/UDP 이벤트 브로드캐스터 구현, mediamtx+ffmpeg로 RTSP 송출. VMS 앱 코드와 별도 디렉토리·별도 CMake 빌드로 분리
 - Phase 1(카메라 자동 탐색, ONVIF-lite Discovery) 완료 (2026-09-08) — `OnvifLiteClient` 신설, `DeviceService`가 `device.source`(기본 `"onvif"`)로 서버/목업 분기, `DeviceCheckScreen`/`mainwindow_auth.cpp`의 `startRequested` 핸들러는 무수정. 목업 호스트 대상 DeviceCheck→Main 재생 확인 완료. 세부 내용은 `docs/dev_execution_plan.md` Phase 1 섹션 참고
-- 다음 작업: Phase 2(CctvControlService 직접 제어 전환) — control 와이어 포맷을 GET+query-param 스타일로 전환하기로 결정됨(문서화만 완료, 구현은 Phase 2에서)
+- Phase 2(CctvControlService 직접 제어 전환) 완료 (2026-09-09) — 계획했던 GET+query-param CGI 방식을 재검토해서 **ONVIF PTZ(`RelativeMove`)/Imaging(`Move`) SOAP**으로 변경(벤더별로 다른 CGI보다 표준 프로토콜이 낫다고 판단, Phase 1의 `OnvifLiteClient` 재사용). `cgi_mock.cpp`는 이번엔 안 씀. `CctvScreen`/`zoomStep`/`focusStep` 시그니처는 무수정. 세부 내용은 `docs/dev_execution_plan.md` Phase 2 섹션 참고
+- 다음 작업: Phase 3b(로컬 자격증명 캐시) — Phase 2 논의 중 구체 설계(디바이스 트리 선택 후 Main 진입 전 ID/PW 모달, 게스트=휘발성/회원=QtKeychain 영구)가 나왔음. `docs/roadmap.md` Phase 3b 섹션 참고
 - 포트폴리오용 요약: `docs/refactoring_improvements.md` (왜 리팩토링했는지 + 무엇을 개선했는지, 세부 실행 로그와 별개로 성과 관점 정리)
 - RPi 하드웨어 대기 상태는 해제됨 (`docs/roadmap.md` 3.6절) — Phase 0/1/2/4/5 순서대로 진행 가능

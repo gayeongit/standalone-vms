@@ -137,15 +137,7 @@ bool loadAppConfig(AppConfig *out, QString *errorMessage)
         out->onvifManualXAddr = onvifManualXAddr;
     }
 
-    const QJsonObject cctvObj = root.value("cctv").toObject();
-    const QString zoomPath = cctvObj.value("zoomPath").toString().trimmed();
-    if (!zoomPath.isEmpty()) {
-        out->cctvZoomPathTemplate = zoomPath;
-    }
-    const QString focusPath = cctvObj.value("focusPath").toString().trimmed();
-    if (!focusPath.isEmpty()) {
-        out->cctvFocusPathTemplate = focusPath;
-    }
+    // Phase 2: cctv zoom/focus는 ONVIF PTZ/Imaging으로 직접 가므로 REST path 설정이 필요 없어짐.
 
     const QJsonObject playbackObj = root.value("playback").toObject();
     QString channelsByDatePath = playbackObj.value("channelsByDatePathTemplate").toString().trimmed();

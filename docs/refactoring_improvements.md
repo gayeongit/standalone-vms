@@ -69,7 +69,17 @@ discover()                    — WS-Discovery Probe (네트워크 전체, 1회)
 
 `fetchDevices()` 시점에 위 시퀀스를 디바이스별로 병렬 실행해서 채널 목록·RTSP·코덱까지 전부 미리 캐싱해두기 때문에, 이후 화면에서 호출하는 `fetchDeviceChannels()`/`fetchChannelDetail()`은 **캐시만 읽고 새 네트워크 호출을 하지 않는다.** 결과적으로 디바이스 2개·채널 2개 기준 최초 7~9회였던 호출이, 최초 discovery+프로필 조회 시점에 한 번 몰리고 그 이후 화면 조작에서는 추가 네트워크 호출 없이 즉시 응답하는 구조로 바뀌었다.
 
-이 결정을 내리기 전에 "그냥 SUNAPI(한화비전 CGI)로 가는 게 낫지 않을까"도 검토했는데, SUNAPI의 zoom/focus 파라미터는 파트너 포털에 gated돼 있어 공개 검증이 어려웠고, ONVIF의 실제 PTZ/zoom 제어는 CGI가 아니라 SOAP이라 오히려 복잡도가 늘었다. 그래서 discovery는 ONVIF-lite로, 제어(zoom/focus)는 SUNAPI를 그대로 베끼지 않고 GET+query-param 스타일 정도로만 "카메라스럽게" 가져가기로 결정했다 (제어 쪽은 Phase 2에서 적용).
+이 결정을 내리기 전에 "그냥 SUNAPI(한화비전 CGI)로 가는 게 낫지 않을까"도 검토했는데, SUNAPI의 zoom/focus 파라미터는 파트너 포털에 gated돼 있어 공개 검증이 어려웠고, ONVIF의 실제 PTZ/zoom 제어는 CGI가 아니라 SOAP이라 오히려 복잡도가 늘었다. 그래서 discovery는 ONVIF-lite로 확정했고, 제어(zoom/focus)는 처음엔 "SUNAPI를 그대로 베끼지 않는 GET+query-param 스타일" 정도로 잠정 결정해뒀다 — 이 결정은 Phase 2에서 다시 뒤집힌다(2.4절).
+
+### 2.4 제어(zoom/focus)도 표준 프로토콜로 — CGI 대신 ONVIF PTZ (Phase 2)
+
+Phase 2 착수 시점에 "PTZ 제어 API가 카메라 벤더마다 다 다른데, 우리가 만드는 CGI 방식도 결국 아무 카메라도 안 쓰는 방언 아닌가?"라는 질문에서 다시 설계를 검토했다.
+
+- 한화 SUNAPI, Axis VAPIX, Dahua CGI는 서로 호환되지 않는 벤더별 형식이다. Phase 1에서 이미 만든 "GET+query-param" CGI도 실제로는 우리 mock 하나만 아는 방언이라 범용성이 없었다.
+- ONVIF는 PTZ(`RelativeMove`)/Imaging(`Move`) 서비스를 표준화해뒀다 — ONVIF Profile S를 지원하는 실제 카메라라면 공통으로 동작한다.
+- 현재 UI는 "누르면 -100~100 중 한 스텝만큼 이동"하는 discrete 방식이라, "누르고 있는 동안 계속 이동"하는 `ContinuousMove`보다 "정해진 양만큼 이동 후 정지"하는 `RelativeMove`/Imaging `Move`(Relative)가 UX와 정확히 맞아떨어졌다.
+
+그래서 discovery(Phase 1)와 제어(Phase 2)를 같은 ONVIF 프로토콜 계열로 통일했다. `CctvControlService`의 public 시그니처(`zoomStep`/`focusStep`, step 검증 -100~100)는 그대로 두고 내부 구현만 REST POST+JSON body → ONVIF SOAP `RelativeMove`/`Move`로 교체했다. channelId별로 필요한 ONVIF 주소/프로필 토큰은 discovery 시점에 이미 알아낸 정보를 `AppState`에 노출해서 재사용했다 — 서비스 간에 새로운 의존을 만들지 않고 "AppState를 접점으로 삼는다"는 원칙을 그대로 지킨 것.
 
 ---
 
@@ -90,14 +100,14 @@ discover()                    — WS-Discovery Probe (네트워크 전체, 1회)
 | 카메라 데이터 경로 | 전부 서버 REST 프록시 | VMS가 카메라(목업/실카메라)와 직접 통신 |
 | 디바이스 2개·채널 2개 조회 시 HTTP/SOAP 호출 | 7~9회 (매 조회마다 재발생) | discovery+프로필 조회 1세트 (최초 1회), 이후 화면 조작은 캐시 응답 |
 | 채널 목록/상세 조회 | 별도 엔드포인트 2단계 | ONVIF `GetProfiles` 한 번으로 통합 |
+| zoom/focus 제어 | 서버 REST 프록시(POST+JSON body) | 서버 상태와 무관하게 카메라로 직접 ONVIF PTZ/Imaging SOAP |
 | 화면/미디어 계층 코드 | — | 무수정 (서비스 인터페이스 유지 원칙) |
 
 ---
 
 ## 5. 남은 작업
 
-- **Phase 2** — `CctvControlService` zoom/focus를 실제 카메라(목업)와 직접 통신하도록 전환, 와이어 포맷을 GET+query-param 스타일로 변경
-- **Phase 3b** — 카메라별 로그인 자격증명을 QtKeychain으로 로컬 캐싱
+- **Phase 3b** — 카메라별 로그인 자격증명을 QtKeychain으로 로컬 캐싱 (디바이스 선택 후 Main 진입 전 ID/PW 모달, 게스트=휘발성/회원=영구 저장)
 - **Phase 4** — UDP 브로드캐스트 이벤트를 서버 없이 직접 수신
 - **Phase 5(선택)** — Playback을 mediamtx 기반으로 전환
 - **Phase 6** — 통합 검증 + 최종 문서/발표자료 정리
