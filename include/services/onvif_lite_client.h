@@ -67,18 +67,23 @@ public:
     void invalidate();
 
     // PTZ RelativeMove — zoomDelta는 정규화된 상대 이동량(-1.0~1.0 권장). Pan/Tilt는 안 씀(zoom만 조작).
+    // Phase 3b: username/password로 WS-Security UsernameToken을 생성해 요청에 싣는다.
     void relativeMove(
         const QString &xaddr,
         const QString &profileToken,
         double zoomDelta,
+        const QString &username,
+        const QString &password,
         QObject *context,
         std::function<void(bool ok, const QString &errorMessage)> callback);
 
-    // Imaging Move(Relative) — focusDelta도 정규화된 상대 이동량.
+    // Imaging Move(Relative) — focusDelta도 정규화된 상대 이동량. Phase 3b: 위와 동일하게 인증 포함.
     void imagingRelativeMove(
         const QString &xaddr,
         const QString &videoSourceToken,
         double focusDelta,
+        const QString &username,
+        const QString &password,
         QObject *context,
         std::function<void(bool ok, const QString &errorMessage)> callback);
 

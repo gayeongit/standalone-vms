@@ -8,6 +8,8 @@
 #include "clip_capture_manager.h"
 #include "common_ui.h"
 #include "cctv_control_service.h"
+#include "credential_store.h"
+#include "device_credential_dialog.h"
 #include "device_service.h"
 #include "onvif_lite_client.h"
 #include "event_service.h"
@@ -30,8 +32,28 @@
 #include <QSet>
 #include <QSharedPointer>
 #include <QTimer>
+#include <QUrl>
 
 using namespace MainWindowInternal;
+
+namespace {
+// Phase 3b: GetStreamUri가 돌려주는 순수 RTSP 주소에 캐시된 자격증명을 끼워 넣는다.
+// StreamPlayer는 rtspsrc location="..."으로 URL을 그대로 받아쓰기 때문에, 여기서 한 번만
+// 처리해두면 미디어 계층은 한 줄도 안 건드려도 된다 (설계 원칙 1/2).
+QString embedRtspCredentials(const QString &rtsp, const QString &username, const QString &password)
+{
+    if (rtsp.trimmed().isEmpty() || (username.isEmpty() && password.isEmpty())) {
+        return rtsp;
+    }
+    QUrl url(rtsp);
+    if (!url.isValid()) {
+        return rtsp;
+    }
+    url.setUserName(username);
+    url.setPassword(password);
+    return url.toString(QUrl::FullyEncoded);
+}
+} // namespace
 
 void MainWindow::setupConnections()
 {
@@ -159,7 +181,135 @@ void MainWindow::setupConnections()
         // normalized가 비어 있으면 아래 pending 루프가 그냥 0회 돌고 finalize()가 즉시 호출된다.
         auto normalized = normalizeSelectedContextsForRuntime(selectedContexts);
 
+        // Phase 3b: 선택된 채널들의 디바이스(deviceIp 기준)마다 자격증명이 세션 캐시에 있는지 확인.
+        // discovery/트리 조회 자체는 무인증이라 여기서 처음 걸린다 — RTSP 재생/PTZ 제어에만 필요.
+        // 로그인 상태면 QtKeychain을 먼저 보고, 없으면 모달. 모달을 취소하면 그 디바이스의
+        // 채널은 이번 선택에서 제외한다.
+        //
+        // 모달에 새로 입력한 값(캐시/키체인에서 가져온 게 아닌 것)은 대표 채널 하나로 PTZ에
+        // delta=0 "ping"을 날려 맞는지 바로 검증한다. 틀리면 캐시에서 지우고, 그 디바이스는
+        // 기존 "RTSP 조회 실패" 채널과 똑같이 그리드에서 제외한다 — 새 재시도 UI는 만들지 않고,
+        // "연결 안 됨" 상태로 그리드에 남는 대신 아예 안 보이게(선택 안 한 것처럼) 처리한다.
         m_deviceScreen->setEnabled(false);
+
+        QSet<QString> rejectedIps;
+        QSet<QString> freshlyEnteredIps;
+        {
+            auto &credentialState = AppState::instance();
+            QSet<QString> processedIps;
+            for (const auto &ctx : normalized) {
+                const QString deviceIp = ctx.deviceIp.trimmed();
+                if (deviceIp.isEmpty() || processedIps.contains(deviceIp)) {
+                    continue;
+                }
+                processedIps.insert(deviceIp);
+                if (credentialState.deviceCredentialUsernameByIp.contains(deviceIp)) {
+                    continue;
+                }
+                QString loadedUsername;
+                QString loadedPassword;
+                if (credentialState.isAuthenticated
+                    && CredentialStore::load(deviceIp, &loadedUsername, &loadedPassword)) {
+                    credentialState.deviceCredentialUsernameByIp.insert(deviceIp, loadedUsername);
+                    credentialState.deviceCredentialPasswordByIp.insert(deviceIp, loadedPassword);
+                    continue;
+                }
+                const QString label = ctx.displayName.trimmed().isEmpty() ? deviceIp : ctx.displayName.trimmed();
+                DeviceCredentialDialog dialog(label, this);
+                if (dialog.exec() != QDialog::Accepted) {
+                    rejectedIps.insert(deviceIp);
+                    continue;
+                }
+                credentialState.deviceCredentialUsernameByIp.insert(deviceIp, dialog.username());
+                credentialState.deviceCredentialPasswordByIp.insert(deviceIp, dialog.password());
+                if (credentialState.isAuthenticated) {
+                    CredentialStore::save(deviceIp, dialog.username(), dialog.password());
+                }
+                freshlyEnteredIps.insert(deviceIp);
+            }
+        }
+
+        // deviceIp별 대표 채널(ping에 쓸 PTZ xaddr/token을 얻기 위함 — DeviceService 캐시라 네트워크 요청 없음).
+        QHash<QString, int> representativeChannelIdByIp;
+        for (const auto &ctx : normalized) {
+            const QString deviceIp = ctx.deviceIp.trimmed();
+            if (ctx.channelId < 0 || !freshlyEnteredIps.contains(deviceIp)
+                || representativeChannelIdByIp.contains(deviceIp)) {
+                continue;
+            }
+            representativeChannelIdByIp.insert(deviceIp, ctx.channelId);
+        }
+
+        auto proceedWithCredentials = [this, showSettingsDialog, normalized, rejectedIps](const QSet<QString> &pingFailedIps) {
+            QVector<SelectedChannelContext> credentialFiltered;
+            credentialFiltered.reserve(normalized.size());
+            auto &credentialState = AppState::instance();
+            for (const auto &ctx : normalized) {
+                const QString deviceIp = ctx.deviceIp.trimmed();
+                if (!deviceIp.isEmpty() && (rejectedIps.contains(deviceIp) || pingFailedIps.contains(deviceIp))) {
+                    continue;
+                }
+                credentialFiltered.push_back(ctx);
+            }
+            runDeviceSelectionPipeline(showSettingsDialog, credentialFiltered);
+        };
+
+        if (freshlyEnteredIps.isEmpty()) {
+            proceedWithCredentials({});
+            return;
+        }
+
+        auto pingPending = QSharedPointer<int>::create(static_cast<int>(freshlyEnteredIps.size()));
+        auto pingFailedIps = QSharedPointer<QSet<QString>>::create();
+        for (const QString &deviceIp : freshlyEnteredIps) {
+            const int repChannelId = representativeChannelIdByIp.value(deviceIp, -1);
+            if (repChannelId < 0) {
+                // ping에 쓸 PTZ 정보가 없는 디바이스(예외적) — 검증 없이 통과시키고 나중에 실제
+                // RTSP/PTZ 시도에서 실패하도록 둔다.
+                *pingPending -= 1;
+                if (*pingPending <= 0) {
+                    proceedWithCredentials(*pingFailedIps);
+                }
+                continue;
+            }
+            m_deviceService->fetchChannelDetail(repChannelId, this, [this, deviceIp, pingPending, pingFailedIps, proceedWithCredentials](const ChannelDetailResult &detail) {
+                if (!detail.ok || detail.onvifPtzXAddr.trimmed().isEmpty() || detail.onvifProfileToken.trimmed().isEmpty()) {
+                    *pingPending -= 1;
+                    if (*pingPending <= 0) {
+                        proceedWithCredentials(*pingFailedIps);
+                    }
+                    return;
+                }
+                auto &state = AppState::instance();
+                const QString username = state.deviceCredentialUsernameByIp.value(deviceIp);
+                const QString password = state.deviceCredentialPasswordByIp.value(deviceIp);
+                m_onvifLiteClient->relativeMove(detail.onvifPtzXAddr, detail.onvifProfileToken, 0.0, username, password, this,
+                    [deviceIp, pingPending, pingFailedIps, proceedWithCredentials](bool ok, const QString &/*errorMessage*/) {
+                        if (!ok) {
+                            auto &state = AppState::instance();
+                            state.deviceCredentialUsernameByIp.remove(deviceIp);
+                            state.deviceCredentialPasswordByIp.remove(deviceIp);
+                            pingFailedIps->insert(deviceIp);
+                        }
+                        *pingPending -= 1;
+                        if (*pingPending <= 0) {
+                            proceedWithCredentials(*pingFailedIps);
+                        }
+                    });
+            });
+        }
+    });
+    connect(m_deviceScreen, &DeviceCheckScreen::backToLoginRequested, this, [this]() {
+        if (m_loginScreen) {
+            m_loginScreen->resetLoginInputs();
+        }
+        showScreen(ScreenId::Login);
+    });
+
+}
+
+void MainWindow::runDeviceSelectionPipeline(std::function<void()> showSettingsDialog, const QVector<SelectedChannelContext> &normalized)
+{
         auto pending = QSharedPointer<int>::create(0);
         auto resolvedRtsp = QSharedPointer<QHash<QString, QString>>::create();
         auto resolvedCodecs = QSharedPointer<QHash<QString, QString>>::create();
@@ -182,6 +332,8 @@ void MainWindow::setupConnections()
             state.channelOnvifPtzXAddrById.clear();
             state.channelOnvifImagingXAddrById.clear();
             state.channelOnvifProfileTokenById.clear();
+            state.channelOnvifUsernameById.clear();
+            state.channelOnvifPasswordById.clear();
 
             QVector<SelectedChannelContext> resolvedContexts;
             resolvedContexts.reserve(normalized.size());
@@ -196,9 +348,20 @@ void MainWindow::setupConnections()
                     continue;
                 }
                 ctx.videoCodec = state.channelVideoCodecByName.value(name).trimmed();
+                // Phase 3b: 이 채널이 속한 디바이스의 세션 캐시 자격증명을 RTSP URL에 끼워 넣는다.
+                const QString deviceIp = ctx.deviceIp.trimmed();
+                const QString onvifUsername = state.deviceCredentialUsernameByIp.value(deviceIp);
+                const QString onvifPassword = state.deviceCredentialPasswordByIp.value(deviceIp);
+                const QString embeddedRtsp = embedRtspCredentials(
+                    state.channelRtspByName.value(name).trimmed(), onvifUsername, onvifPassword);
+                state.channelRtspByName.insert(name, embeddedRtsp);
                 if (ctx.channelId >= 0) {
-                    state.channelRtspById.insert(ctx.channelId, state.channelRtspByName.value(name).trimmed());
+                    state.channelRtspById.insert(ctx.channelId, embeddedRtsp);
                     state.channelVideoCodecById.insert(ctx.channelId, ctx.videoCodec);
+                    if (!onvifUsername.isEmpty() || !onvifPassword.isEmpty()) {
+                        state.channelOnvifUsernameById.insert(ctx.channelId, onvifUsername);
+                        state.channelOnvifPasswordById.insert(ctx.channelId, onvifPassword);
+                    }
                     const QString onvifPtzXAddr = resolvedOnvifPtzXAddrs->value(name).trimmed();
                     const QString onvifImagingXAddr = resolvedOnvifImagingXAddrs->value(name).trimmed();
                     if (!onvifPtzXAddr.isEmpty() || !onvifImagingXAddr.isEmpty()) {
@@ -282,14 +445,6 @@ void MainWindow::setupConnections()
                 }
             });
         }
-    });
-    connect(m_deviceScreen, &DeviceCheckScreen::backToLoginRequested, this, [this]() {
-        if (m_loginScreen) {
-            m_loginScreen->resetLoginInputs();
-        }
-        showScreen(ScreenId::Login);
-    });
-
 }
 
 void MainWindow::connectRuntimeScreens(std::function<void()> openSettingsHandler)
@@ -561,6 +716,10 @@ void MainWindow::clearAuthenticationState()
     state.channelOnvifPtzXAddrById.clear();
     state.channelOnvifImagingXAddrById.clear();
     state.channelOnvifProfileTokenById.clear();
+    state.channelOnvifUsernameById.clear();
+    state.channelOnvifPasswordById.clear();
+    state.deviceCredentialUsernameByIp.clear();
+    state.deviceCredentialPasswordByIp.clear();
     state.clearAllGridCells();
     state.activeChannel.clear();
     state.activeCctvChannelId = -1;

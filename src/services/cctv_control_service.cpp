@@ -87,6 +87,10 @@ void CctvControlService::requestControl(
         return;
     }
 
+    // Phase 3b: 채널 선택 시점에 finalize()가 AppState에 채워둔 자격증명(장치별로 캐시된 것).
+    const QString username = state.channelOnvifUsernameById.value(channelId);
+    const QString password = state.channelOnvifPasswordById.value(channelId);
+
     // ONVIF 정규화 공간(-1.0~1.0)에 맞춰 -100~100 step을 스케일링.
     const double delta = value / 100.0;
 
@@ -107,8 +111,8 @@ void CctvControlService::requestControl(
 
     QObject *effectiveContext = context ? context : this;
     if (kind == ControlKind::Zoom) {
-        m_onvifClient->relativeMove(xaddr, token, delta, effectiveContext, onDone);
+        m_onvifClient->relativeMove(xaddr, token, delta, username, password, effectiveContext, onDone);
     } else {
-        m_onvifClient->imagingRelativeMove(xaddr, token, delta, effectiveContext, onDone);
+        m_onvifClient->imagingRelativeMove(xaddr, token, delta, username, password, effectiveContext, onDone);
     }
 }

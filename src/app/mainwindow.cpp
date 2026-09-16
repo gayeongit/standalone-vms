@@ -378,6 +378,10 @@ void MainWindow::initializeState()
     state.channelOnvifPtzXAddrById.clear();
     state.channelOnvifImagingXAddrById.clear();
     state.channelOnvifProfileTokenById.clear();
+    state.channelOnvifUsernameById.clear();
+    state.channelOnvifPasswordById.clear();
+    state.deviceCredentialUsernameByIp.clear();
+    state.deviceCredentialPasswordByIp.clear();
     state.clearAllGridCells();  // 메인화면 멀티뷰 셀 초기화
     pruneStateDeviceSelection(state);
 }

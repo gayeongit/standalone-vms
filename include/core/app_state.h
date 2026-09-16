@@ -68,6 +68,15 @@ public:
     QHash<int, QString> channelOnvifImagingXAddrById; // Phase 2: Move(focus) 대상 Imaging Service 주소
     QHash<int, QString> channelOnvifProfileTokenById; // Phase 2: RelativeMove/Move에 넘길 프로필 토큰
 
+    // Phase 3b: 자격증명 세션 캐시. deviceId(int)는 새로고침마다 재할당되어 불안정하므로
+    // deviceIp(문자열)를 키로 쓴다 — QtKeychain 영구 저장 키와도 동일하게 맞춤.
+    QHash<QString, QString> deviceCredentialUsernameByIp;
+    QHash<QString, QString> deviceCredentialPasswordByIp;
+    // 위 세션 캐시에서 finalize() 시점에 복제해두는 channelId 키 버전 — RTSP 임베드/PTZ 요청에서
+    // channelOnvifPtzXAddrById 등과 동일한 방식으로 바로 조회할 수 있게.
+    QHash<int, QString> channelOnvifUsernameById;
+    QHash<int, QString> channelOnvifPasswordById;
+
     void setGridCell(std::size_t index, const QString &displayName, int channelId, int deviceId)
     {
         if (index >= gridCells.size()) {

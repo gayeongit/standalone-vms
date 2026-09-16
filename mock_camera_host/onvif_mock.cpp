@@ -7,6 +7,7 @@
 // 액션 판별도 QXmlStreamReader 없이 단순 substring 검사로 충분하다.
 
 #include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QDebug>
 #include <QNetworkDatagram>
 #include <QRegularExpression>
@@ -28,6 +29,11 @@ constexpr quint16 kDeviceServicePort = 8082;
 const QString kDeviceServiceXAddr =
     QStringLiteral("http://127.0.0.1:%1/onvif/device_service").arg(kDeviceServicePort);
 const QString kDeviceUuid = QStringLiteral("urn:uuid:4b2a6b8e-0000-4000-8000-000000000001"); // 고정 더미 UUID
+
+// Phase 3b: PTZ/Imaging(RelativeMove/Move)에만 거는 하드코딩 계정. mediamtx.yml의 RTSP read
+// 계정과 동일하게 맞춰서, VMS가 캐시해둔 자격증명 하나로 영상 재생+PTZ 제어가 둘 다 되게 한다.
+const QString kMockUsername = QStringLiteral("admin");
+const QString kMockPassword = QStringLiteral("admin1234");
 
 // GetCapabilities가 알려주는 Media/PTZ/Imaging 서비스 주소. 실제로는 다른 포트/호스트일 수도 있지만
 // 이 mock은 같은 QTcpServer가 액션 이름으로만 분기하므로 경로만 구분해도 충분하다(설계 원칙 4) —
@@ -186,6 +192,31 @@ QByteArray buildGetStreamUriResponse(const QString &profileToken)
             .arg(uri));
 }
 
+// Phase 3b: WS-Security UsernameToken(PasswordDigest) 검증. OnvifLiteClient가 매 요청마다
+// 새 Nonce+Created로 digest = Base64(SHA1(Nonce + Created + Password))를 계산해 보내므로,
+// 여기서도 같은 방식으로 재계산해서 비교한다.
+bool verifyWsSecurity(const QByteArray &requestBody)
+{
+    const QString username = extractElementText(requestBody, QStringLiteral("Username"));
+    if (username != kMockUsername) {
+        return false;
+    }
+    const QString passwordDigestBase64 = extractElementText(requestBody, QStringLiteral("Password"));
+    const QString nonceBase64 = extractElementText(requestBody, QStringLiteral("Nonce"));
+    const QString created = extractElementText(requestBody, QStringLiteral("Created"));
+
+    const QByteArray nonceBytes = QByteArray::fromBase64(nonceBase64.toUtf8());
+    const QByteArray digestInput = nonceBytes + created.toUtf8() + kMockPassword.toUtf8();
+    const QByteArray expectedDigest = QCryptographicHash::hash(digestInput, QCryptographicHash::Sha1).toBase64();
+    return passwordDigestBase64.toUtf8() == expectedDigest;
+}
+
+QByteArray buildAuthFailedResponse()
+{
+    return wrapSoapEnvelope(QStringLiteral(
+        "<e:Fault><e:Reason>Authentication failed</e:Reason></e:Fault>"));
+}
+
 QByteArray buildRelativeMoveResponse(const QString &profileToken, const QString &zoomDelta)
 {
     qInfo().noquote() << "onvif_mock: PTZ RelativeMove token=" << profileToken << "zoom=" << zoomDelta;
@@ -198,40 +229,56 @@ QByteArray buildImagingMoveResponse(const QString &videoSourceToken, const QStri
     return wrapSoapEnvelope(QStringLiteral("<timg:MoveResponse/>"));
 }
 
-QByteArray buildDeviceServiceResponse(const QByteArray &requestBody)
+struct DeviceServiceResponse
+{
+    int statusCode = 200;
+    QString statusText = QStringLiteral("OK");
+    QByteArray body;
+};
+
+DeviceServiceResponse buildDeviceServiceResponse(const QByteArray &requestBody)
 {
     // Phase 2: PTZ RelativeMove / Imaging Move. "RelativeMove"가 먼저 걸리게 순서에 주의
     // (둘 다 문자열 "Move"를 포함하므로 Imaging은 VideoSourceToken 존재로 구분).
+    // Phase 3b: 이 둘만 WS-Security 인증을 검사한다 — discovery/GetProfiles류는 여전히 무인증.
     if (requestBody.contains("RelativeMove")) {
+        if (!verifyWsSecurity(requestBody)) {
+            qWarning().noquote() << "onvif_mock: PTZ RelativeMove 인증 실패";
+            return {401, QStringLiteral("Unauthorized"), buildAuthFailedResponse()};
+        }
         const QString token = extractElementText(requestBody, QStringLiteral("ProfileToken"));
         const QString zoom = extractAttributeValue(requestBody, QStringLiteral("Zoom"), QStringLiteral("x"));
-        return buildRelativeMoveResponse(token, zoom);
+        return {200, QStringLiteral("OK"), buildRelativeMoveResponse(token, zoom)};
     }
     if (requestBody.contains("VideoSourceToken")) {
+        if (!verifyWsSecurity(requestBody)) {
+            qWarning().noquote() << "onvif_mock: Imaging Move 인증 실패";
+            return {401, QStringLiteral("Unauthorized"), buildAuthFailedResponse()};
+        }
         const QString token = extractElementText(requestBody, QStringLiteral("VideoSourceToken"));
         const QString distance = extractElementText(requestBody, QStringLiteral("Distance"));
-        return buildImagingMoveResponse(token, distance);
+        return {200, QStringLiteral("OK"), buildImagingMoveResponse(token, distance)};
     }
     if (requestBody.contains("GetStreamUri")) {
         const QString token = extractProfileToken(requestBody);
         qInfo().noquote() << "onvif_mock: GetStreamUri token=" << token;
-        return buildGetStreamUriResponse(token);
+        return {200, QStringLiteral("OK"), buildGetStreamUriResponse(token)};
     }
     if (requestBody.contains("GetProfiles")) {
         qInfo().noquote() << "onvif_mock: GetProfiles";
-        return buildGetProfilesResponse();
+        return {200, QStringLiteral("OK"), buildGetProfilesResponse()};
     }
     if (requestBody.contains("GetDeviceInformation")) {
         qInfo().noquote() << "onvif_mock: GetDeviceInformation";
-        return buildGetDeviceInformationResponse();
+        return {200, QStringLiteral("OK"), buildGetDeviceInformationResponse()};
     }
     if (requestBody.contains("GetCapabilities")) {
         qInfo().noquote() << "onvif_mock: GetCapabilities -> media=" << kMediaServiceXAddr
                            << "ptz=" << kPtzServiceXAddr << "imaging=" << kImagingServiceXAddr;
-        return buildGetCapabilitiesResponse();
+        return {200, QStringLiteral("OK"), buildGetCapabilitiesResponse()};
     }
     qWarning().noquote() << "onvif_mock: 처리 못한 device_service SOAP 요청";
-    return wrapSoapEnvelope(QStringLiteral("<!-- unsupported action -->"));
+    return {200, QStringLiteral("OK"), wrapSoapEnvelope(QStringLiteral("<!-- unsupported action -->"))};
 }
 
 void startDiscoveryListener(QObject *parent)
@@ -292,16 +339,18 @@ void handleDeviceServiceRequest(QTcpSocket *socket)
     }
     const QByteArray body = buf.mid(bodyStart, contentLength);
 
-    const QByteArray responseBody = buildDeviceServiceResponse(body);
+    const DeviceServiceResponse deviceResponse = buildDeviceServiceResponse(body);
     const QByteArray response = QStringLiteral(
-                                     "HTTP/1.1 200 OK\r\n"
+                                     "HTTP/1.1 %1 %2\r\n"
                                      "Content-Type: application/soap+xml\r\n"
-                                     "Content-Length: %1\r\n"
+                                     "Content-Length: %3\r\n"
                                      "Connection: close\r\n"
                                      "\r\n")
-                                     .arg(responseBody.size())
+                                     .arg(deviceResponse.statusCode)
+                                     .arg(deviceResponse.statusText)
+                                     .arg(deviceResponse.body.size())
                                      .toUtf8()
-        + responseBody;
+        + deviceResponse.body;
 
     socket->write(response);
     socket->waitForBytesWritten(1000);

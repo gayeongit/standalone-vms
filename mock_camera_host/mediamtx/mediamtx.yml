@@ -62,6 +62,8 @@ authMethod: internal
 authInternalUsers:
   # Default unprivileged user.
   # Username. 'any' means any user, including anonymous ones.
+  # Phase 3b: read는 여기서 뺐다 — ffmpeg가 이 파일의 runOnInit에서 무인증으로 publish는 계속 하지만,
+  # 실제 재생(read)은 아래 admin 계정으로만 허용해서 VMS가 캐시된 자격증명을 실제로 쓰는지 검증한다.
   - user: any
     # Password. Not used in case of 'any' user.
     pass:
@@ -75,9 +77,16 @@ authInternalUsers:
         # An empty path means any path.
         # Regular expressions can be used by using a tilde as prefix.
         path:
-      - action: read
-        path:
       - action: playback
+        path:
+
+  # Phase 3b: RTSP 재생(read)은 이 계정으로만 허용 — onvif_mock.cpp의 WS-Security 검증 계정과 동일
+  # (admin/admin1234). VMS가 잘못된 자격증명으로 연결하면 실제로 재생이 거부되어야 의미가 있음.
+  - user: admin
+    pass: admin1234
+    ips: []
+    permissions:
+      - action: read
         path:
 
     # Default administrator.

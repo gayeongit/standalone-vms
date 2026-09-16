@@ -21,6 +21,17 @@ if(PkgConfig_FOUND)
     endif()
 endif()
 
+# Phase 3b: QtKeychain은 Qt SDK에 안 포함되어 있어 FetchContent로 소스를 받아 같이 빌드한다
+# (vcpkg 등 별도 설치 불필요 — 첫 configure 때 자동으로 clone됨).
+include(FetchContent)
+FetchContent_Declare(qtkeychain
+    GIT_REPOSITORY https://github.com/frankosterfeld/qtkeychain.git
+    GIT_TAG v0.14.0
+)
+set(BUILD_WITH_QT6 ON CACHE BOOL "" FORCE)
+set(BUILD_TRANSLATIONS OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(qtkeychain)
+
 file(GLOB_RECURSE PROJECT_CPP_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
 )
@@ -56,7 +67,10 @@ add_executable(VMS_v2
     endif()
 endif()
 
-target_link_libraries(VMS_v2 PRIVATE Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::OpenGLWidgets Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::WebSockets Qt${QT_VERSION_MAJOR}::Concurrent)
+target_link_libraries(VMS_v2 PRIVATE Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::OpenGLWidgets Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::WebSockets Qt${QT_VERSION_MAJOR}::Concurrent qt${QT_VERSION_MAJOR}keychain)
+# qtkeychain의 CMakeLists.txt는 install(INSTALL_INTERFACE)에서만 include 경로를 노출해서
+# FetchContent로 직접 빌드하는 경우(설치 없이 씀)엔 안 전파된다 — 직접 추가.
+target_include_directories(VMS_v2 PRIVATE "${qtkeychain_SOURCE_DIR}" "${qtkeychain_BINARY_DIR}")
 target_compile_definitions(VMS_v2 PRIVATE VMS_WITH_GSTREAMER=${VMS_WITH_GSTREAMER})
 target_include_directories(VMS_v2 PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
@@ -86,6 +100,12 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/app_config.json")
             "${CMAKE_CURRENT_SOURCE_DIR}/app_config.json"
             "$<TARGET_FILE_DIR:VMS_v2>/app_config.json")
 endif()
+
+# qt6keychain은 shared 라이브러리로 빌드되므로, 실행 시 PATH 없이도 찾을 수 있게 exe 옆에 복사.
+add_custom_command(TARGET VMS_v2 POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "$<TARGET_FILE:qt6keychain>"
+        "$<TARGET_FILE_DIR:VMS_v2>")
 
 # Qt for iOS sets MACOSX_BUNDLE_GUI_IDENTIFIER automatically since Qt 6.1.
 # If you are developing for iOS or macOS you should consider setting an

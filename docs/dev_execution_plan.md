@@ -240,7 +240,83 @@ Phase 2 완료 후 사용자가 ONVIF 실제 흐름을 다룬 외부 글([onvif-
 
 ---
 
+## Phase 3b. 로컬 자격증명 캐시
+
+### 진입 전 결정 (2026-09-16)
+
+**어디에 인증을 걸 것인가.** 처음엔 "discovery로 디바이스 찾고, 그 디바이스 정보(GetCapabilities/GetProfiles/GetStreamUri)를 ID/PW로 요청"하는 흐름을 생각했는데, 이러면 `DeviceCheckScreen`의 채널 트리 자체가 인증 없이는 안 그려진다 — "채널 선택부터 하고 나중에 ID/PW 입력" 흐름과 정면으로 충돌한다.
+
+**결정**: discovery/트리 조회(`GetDeviceInformation`/`GetCapabilities`/`GetProfiles`/`GetStreamUri`)는 Phase 1 그대로 무인증 유지. **인증은 실제로 "그 장치를 쓸 때"인 두 곳에만 건다:**
+1. RTSP 영상 연결 (`rtsp://id:pw@host/path` 형태로 URL에 자격증명 임베드)
+2. PTZ 제어(`RelativeMove`/`Move`) — WS-Security UsernameToken
+
+이게 사용자가 원래 팀 프로젝트에서 겪었던 흐름("디스커버리 → 채널 목록/RTSP 받고 → 영상 불러올 때/PTZ 조절할 때 ID·PW 포함해서 요청")과 정확히 일치하고, Phase 1에서 이미 테스트 통과한 discovery 흐름도 안 건드리게 된다.
+
+**QtKeychain 도입 방식**: 이 머신에 QtKeychain이 설치되어 있지 않음(vcpkg 없음, Qt Creator 내부 사본은 헤더/lib 없이 못 씀). CMake `FetchContent`로 소스를 받아서 우리 빌드에 같이 컴파일하는 방식으로 결정 — 시스템에 아무것도 수동 설치 안 해도 되고, GStreamer pkg-config 때와 달리 새 설치 없이 첫 configure 때 자동으로 받아진다.
+
+**mock이 인증을 실제로 검증하게 만든다** — 틀린 ID/PW를 넣으면 실제로 연결이 거부되어야 포트폴리오로서 의미가 있다는 결정. `onvif_mock`은 WS-Security digest를 직접 계산해서 비교, `mediamtx`는 자체 `authInternalUsers` 기능으로 RTSP 인증을 검사.
+
+**세션 캐시 vs 영구 저장 키가 다름**: 세션 중 캐시는 `DeviceService`가 이미 갖고 있는 synthetic `deviceId`(int, 세션마다 재할당됨)로 충분하지만, QtKeychain 영구 저장은 재시작해도 같은 카메라를 알아봐야 해서 **`deviceIp`(문자열, 안정적)를 키로 사용** — uuid를 밖으로 더 노출시키지 않고 이미 `SelectedChannelContext.deviceIp`에 있는 값을 재사용.
+
+### 대상
+
+- 신규: `include/ui/device_credential_dialog.h`, `src/ui/device_credential_dialog.cpp` — `SettingsDialog`와 같은 패턴의 `QDialog` (아이디/비번 입력 폼)
+- 신규: `include/services/credential_store.h/.cpp` (가칭) — QtKeychain 래퍼, 세션 캐시(`AppState`)와 영구 저장(QtKeychain) 조정
+- `CMakeLists.txt` — QtKeychain `FetchContent` 추가
+- `include/core/app_state.h` — `deviceOnvifUsernameById`/`deviceOnvifPasswordById`(세션 캐시, `QHash<int, QString>`) 추가
+- `src/app/mainwindow_auth.cpp`의 `startRequested` 핸들러 — 선택된 채널들의 distinct `deviceId` 중 세션 캐시에 없는 것마다 모달 표시(로그인 상태면 먼저 QtKeychain 조회), 입력받은 자격증명으로 RTSP URL에 `id:pw@` 임베드
+- `include/services/onvif_lite_client.h/.cpp` — `relativeMove`/`imagingRelativeMove`에 username/password 파라미터 추가, WS-Security `UsernameToken`(Nonce+Created+PasswordDigest) 헤더 생성 후 SOAP 요청에 포함
+- `include/services/cctv_control_service.h/.cpp` — `requestControl`에서 `deviceIdForChannelId(channelId)`(기존 `channel_context_dnd_helpers` 헬퍼 재사용)로 deviceId 조회 → `AppState`에서 자격증명 조회 → `OnvifLiteClient`에 전달
+- `mock_camera_host/onvif_mock.cpp` — `RelativeMove`/`Move` 요청에서만 WS-Security digest 검증(하드코딩 계정, 예: `admin`/`admin1234`), 불일치 시 401 응답. discovery용 액션(GetDeviceInformation 등)은 무인증 유지
+- `mock_camera_host/mediamtx/mediamtx.yml` — `authInternalUsers`에 같은 계정을 RTSP `read` 권한으로 등록 (현재 `any` 사용자 설정 대체)
+
+### 작업
+
+1. `CMakeLists.txt`에 QtKeychain `FetchContent` 추가, 빈 스켈레톤으로 빌드 확인
+2. `AppState`에 세션 캐시 필드 추가
+3. `DeviceCredentialDialog` 작성 (장치명 표시 + ID/PW 입력 + OK/Cancel)
+4. `CredentialStore`(QtKeychain 래퍼) 작성 — `load(deviceIp)`/`save(deviceIp, username, password)`
+5. `mainwindow_auth.cpp`의 `startRequested`에 모달 트리거 로직 삽입 — distinct deviceId 순회, 세션 캐시 미스 시 (로그인 상태면 QtKeychain 조회 후) 모달, 취소하면 해당 디바이스의 채널은 선택에서 제외
+6. RTSP URL에 자격증명 임베드 (finalize()의 `resolvedRtsp` 처리 지점)
+7. `OnvifLiteClient`에 WS-Security 헤더 생성 추가, `relativeMove`/`imagingRelativeMove` 시그니처 확장
+8. `CctvControlService`가 새 시그니처로 자격증명 전달하도록 수정
+9. `onvif_mock.cpp`에 WS-Security 검증 추가, `mediamtx.yml`에 `authInternalUsers` 설정
+10. 빌드 + 실제 실행 확인
+
+### 구현 중 확정된 세부 사항
+
+- **QtKeychain 태그**: `v0.14.3`은 존재하지 않아 최신 릴리스 `v0.14.0`으로 확정. 기본이 Qt5를 찾게 되어 있어 `BUILD_WITH_QT6 ON`을 강제 설정해야 configure 통과함.
+- **QtKeychain include 경로 이슈**: `qt6keychain` 타깃은 `install(INSTALL_INTERFACE)`에서만 include 경로를 노출해서, FetchContent로 설치 없이 바로 빌드하면 소비하는 쪽(`VMS_v2`)에 헤더 경로가 자동 전파 안 됨 — `target_include_directories(VMS_v2 PRIVATE ${qtkeychain_SOURCE_DIR} ${qtkeychain_BINARY_DIR})`로 직접 추가해서 해결.
+- **QtKeychain은 shared 라이브러리(dll)로 빌드됨** — `VMS_v2.exe`와 같은 폴더로 자동 복사하는 POST_BUILD 스텝 추가(Qt/GStreamer 때와 같은 문제 재발 방지).
+- **자격증명 세션 캐시 키**: `deviceId`(int)는 `DeviceCheckScreen` 새로고침마다 재할당되어 불안정하다는 걸 발견 — `deviceIp`(문자열)로 키를 잡고, `channelId` 키 버전은 `finalize()` 시점에 복제해서 `CctvControlService`/RTSP 임베드에서 바로 조회 가능하게 함.
+- **인증 하드코딩 계정**: `admin`/`admin1234` — `onvif_mock.cpp`의 WS-Security 검증과 `mediamtx.yml`의 RTSP read 계정을 동일하게 맞춰서, 캐시된 자격증명 하나로 영상 재생+PTZ 제어가 둘 다 되게 함.
+- **mediamtx 인증 범위**: `read`(재생)만 인증 필요하도록 제한, `publish`(ffmpeg의 자체 loop push)는 무인증 유지 — publish까지 잠그면 mock 자체의 `runOnInit` 스크립트가 깨짐.
+
+### 틀린 자격증명 시 UX 보정 (2026-09-16)
+
+최초 구현은 "틀린 ID/PW로도 일단 Main에 진입시키고, 해당 채널은 자연스럽게 `연결 안 됨`/`연결 중` 상태로 표시"하는 방식이었다(추가 코드 없이 기존 그레이스풀 디그레이드 동작 재사용). 실제로 동작을 확인한 사용자가 이 UX가 어색하다고 판단 — 타이틀바/닫기(X) 버튼이 있는 "선택된 채널"처럼 보이면서 계속 실패 상태로 남아있는 게 진짜 빈 셀과 헷갈린다는 피드백.
+
+**재시도 모달 같은 새 UI를 만드는 건 오버엔지니어링이라는 데 합의**했고, 대신 다음으로 변경:
+
+1. 모달에서 자격증명을 **새로 입력**받은 디바이스에 한해(캐시/키체인에서 그냥 로드된 경우는 재검증 안 함), 그 디바이스의 대표 채널 PTZ에 `RelativeMove(delta=0)` "ping"을 한 번 날려 인증 여부를 즉시 확인.
+2. ping 실패 시 세션 캐시에서 해당 자격증명을 지우고, 그 디바이스의 채널들을 이미 존재하던 "RTSP 조회 실패" 필터 경로로 그대로 흘려보냄 — 그리드에 배정되지 않아 빈 셀처럼 보인다. 새 팝업/재시도 버튼 없음, 다음에 그 채널을 다시 선택하면 모달이 다시 뜬다.
+3. `main_screen.cpp`(화면 계층)는 전혀 수정하지 않음 — 설계 원칙 1을 지키면서, `finalize()`가 채널을 그리드에 배정하기 전 단계에서 걸러내는 방식으로 해결.
+
+구현상 `startRequested` 핸들러의 후반부(펜딩 카운터·`fetchChannelDetail` fan-out·`finalize`)를 `MainWindow::runDeviceSelectionPipeline(...)`로 분리 — ping 검증이 비동기라 기존 동기 루프 구조로는 이어붙일 수 없었음.
+
+### 완료 기준 / 게이트 테스트
+
+- [x] 빌드 성공 (`VMS_v2` — QtKeychain FetchContent 포함, `mock_camera_host`) — 둘 다 exit code 0
+- [x] 게스트로 채널 선택 → 처음 보는 장치면 ID/PW 모달 → `admin`/`admin1234` 입력 → Main에서 RTSP 재생 + PTZ 정상 동작 — 사용자 확인 완료 (2026-09-16)
+- [x] 틀린 ID/PW 입력 시 RTSP 재생 실패 / PTZ 요청 실패로 이어지는지 (mock이 실제로 거부하는지) — 사용자 확인 완료 (2026-09-16), UX 보정(위 항목) 반영 후 재확인 완료
+- [x] 게스트 모드: 자격증명이 QtKeychain에 저장되지 않고 세션 한정으로만 쓰이는지 — 명시적 재시작 테스트는 안 했지만, 게스트 경로는 `isAuthenticated`가 `false`라 `CredentialStore::save()` 호출 자체가 코드상 실행되지 않으므로 구조적으로 보장됨
+- [x] **로그인 상태(QtKeychain 영구 저장) 테스트는 스코프에서 제외** — 실제/목업 인증 서버가 없어 `AppState.isAuthenticated`를 `true`로 만들 방법이 이 환경에 없음. 이 프로젝트의 목적 자체가 "서버 없이 동작"이므로, 서버 의존적인 이 경로를 억지로 검증하는 것은 우선순위가 아니라고 판단해 의도적으로 스킵(사용자 결정, 2026-09-16)
+
+Phase 3b 완료.
+
+---
+
 ## 다음 Phase 메모
 
-- Phase 2 완료(+사후 보정). 다음은 (3b/4는 순서 무관) → 5(선택) → 6.
-- Phase 3b(자격증명 캐시)는 Phase 2 논의 중 구체 설계(디바이스 트리 → 진입 전 ID/PW 모달 → 게스트 휘발성/회원 QtKeychain 영구)가 나왔음 — `docs/roadmap.md` Phase 3b 섹션 참고, 착수 시 이 문서에 세부 실행계획 이어서 작성. WS-Security(UsernameToken+password digest) 인증도 이때 gSOAP 없이 Qt `QCryptographicHash`로 직접 구현 가능함을 확인해둠 — 세션 토큰이 아니라 매 요청마다 nonce+timestamp로 새로 계산하는 방식.
+- Phase 3b 착수. 위 작업 순서대로 구현 진행.
+- 이후 Phase 4 → 5(선택) → 6 순으로 진행.

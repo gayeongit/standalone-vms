@@ -57,6 +57,7 @@ cmake --build build
 - Phase 0(목업 카메라 호스트 구축, 로컬 PC) 완료 (2026-09-08) — `mock_camera_host/`에 C++/Qt로 ONVIF-lite mock/CGI mock/UDP 이벤트 브로드캐스터 구현, mediamtx+ffmpeg로 RTSP 송출. VMS 앱 코드와 별도 디렉토리·별도 CMake 빌드로 분리
 - Phase 1(카메라 자동 탐색, ONVIF-lite Discovery) 완료 (2026-09-08) — `OnvifLiteClient` 신설, `DeviceService`가 `device.source`(기본 `"onvif"`)로 서버/목업 분기, `DeviceCheckScreen`/`mainwindow_auth.cpp`의 `startRequested` 핸들러는 무수정. 목업 호스트 대상 DeviceCheck→Main 재생 확인 완료. 세부 내용은 `docs/dev_execution_plan.md` Phase 1 섹션 참고
 - Phase 2(CctvControlService 직접 제어 전환) 완료 (2026-09-09) — 계획했던 GET+query-param CGI 방식을 재검토해서 **ONVIF PTZ(`RelativeMove`)/Imaging(`Move`) SOAP**으로 변경(벤더별로 다른 CGI보다 표준 프로토콜이 낫다고 판단, Phase 1의 `OnvifLiteClient` 재사용). `cgi_mock.cpp`는 이번엔 안 씀. `CctvScreen`/`zoomStep`/`focusStep` 시그니처는 무수정. 세부 내용은 `docs/dev_execution_plan.md` Phase 2 섹션 참고
-- 다음 작업: Phase 3b(로컬 자격증명 캐시) — Phase 2 논의 중 구체 설계(디바이스 트리 선택 후 Main 진입 전 ID/PW 모달, 게스트=휘발성/회원=QtKeychain 영구)가 나왔음. `docs/roadmap.md` Phase 3b 섹션 참고
+- Phase 3b(로컬 자격증명 캐시) 완료 (2026-09-16) — discovery/트리 조회는 무인증 유지, RTSP 재생/PTZ 제어에만 ID/PW 요구. 디바이스별 모달(`DeviceCredentialDialog`) + `CredentialStore`(QtKeychain, CMake `FetchContent`로 도입) 신설, 게스트=세션 휘발성/회원=영구 저장. `onvif_mock`/`mediamtx`가 실제로 인증을 거부하게 구현. 틀린 자격증명 입력 시 UX 보정(대표 채널 PTZ ping으로 즉시 검증 → 실패하면 기존 "RTSP 조회 실패" 채널과 동일하게 그리드에서 제외, `main_screen.cpp` 무수정)까지 반영. 로그인 상태의 QtKeychain 영구 저장 테스트는 인증 서버가 없어 검증 불가 + 프로젝트 목적(서버 없이 동작)상 우선순위가 아니라 의도적으로 스킵. 세부 내용은 `docs/dev_execution_plan.md` Phase 3b 섹션 참고
+- 다음 작업: Phase 4(이벤트 직접 수신 경로). `docs/roadmap.md` Phase 4 섹션 참고
 - 포트폴리오용 요약: `docs/refactoring_improvements.md` (왜 리팩토링했는지 + 무엇을 개선했는지, 세부 실행 로그와 별개로 성과 관점 정리)
 - RPi 하드웨어 대기 상태는 해제됨 (`docs/roadmap.md` 3.6절) — Phase 0/1/2/4/5 순서대로 진행 가능

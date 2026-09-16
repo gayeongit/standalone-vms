@@ -1,10 +1,13 @@
 #include "onvif_lite_client.h"
 
+#include <QCryptographicHash>
+#include <QDateTime>
 #include <QNetworkAccessManager>
 #include <QNetworkDatagram>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QPointer>
+#include <QRandomGenerator>
 #include <QRegularExpression>
 #include <QSet>
 #include <QSharedPointer>
@@ -43,6 +46,47 @@ QByteArray buildActionRequest(const QString &prefix, const QString &ns, const QS
     return wrapSoapRequest(QStringLiteral("<%1:%2 xmlns:%1=\"%3\"/>").arg(prefix, action, ns));
 }
 
+// Phase 3b: WS-Security UsernameToken(PasswordDigest). 매 요청마다 새 Nonce+Created로
+// digest = Base64(SHA1(Nonce + Created + Password))를 다시 계산한다 — 세션 토큰이 아니라
+// 매 요청 단위로 증명하는 방식(로드맵/실행계획 Phase 3b "진입 전 결정" 참고).
+QByteArray buildWsSecurityHeader(const QString &username, const QString &password)
+{
+    QByteArray nonceBytes(20, Qt::Uninitialized);
+    for (int i = 0; i < nonceBytes.size(); ++i) {
+        nonceBytes[i] = static_cast<char>(QRandomGenerator::global()->bounded(256));
+    }
+    const QString nonceBase64 = QString::fromLatin1(nonceBytes.toBase64());
+    const QString created = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs) + QStringLiteral("Z");
+
+    const QByteArray digestInput = nonceBytes + created.toUtf8() + password.toUtf8();
+    const QByteArray digest = QCryptographicHash::hash(digestInput, QCryptographicHash::Sha1);
+    const QString digestBase64 = QString::fromLatin1(digest.toBase64());
+
+    return QStringLiteral(
+               "<e:Header><wsse:Security "
+               "xmlns:wsse=\"http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd\" "
+               "xmlns:wsu=\"http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd\">"
+               "<wsse:UsernameToken>"
+               "<wsse:Username>%1</wsse:Username>"
+               "<wsse:Password Type=\"http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordDigest\">%2</wsse:Password>"
+               "<wsse:Nonce EncodingType=\"http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-soap-message-security-1.0#Base64Binary\">%3</wsse:Nonce>"
+               "<wsu:Created>%4</wsu:Created>"
+               "</wsse:UsernameToken></wsse:Security></e:Header>")
+        .arg(username, digestBase64, nonceBase64, created)
+        .toUtf8();
+}
+
+QByteArray wrapSoapRequestWithSecurity(const QString &bodyContent, const QString &username, const QString &password)
+{
+    const QByteArray header = buildWsSecurityHeader(username, password);
+    return QStringLiteral(
+               "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+               "<e:Envelope xmlns:e=\"http://www.w3.org/2003/05/soap-envelope\">"
+               "%1<e:Body>%2</e:Body></e:Envelope>")
+        .arg(QString::fromUtf8(header), bodyContent)
+        .toUtf8();
+}
+
 QByteArray buildGetCapabilitiesRequest()
 {
     return buildActionRequest(QStringLiteral("tds"), QStringLiteral("http://www.onvif.org/ver10/device/wsdl"),
@@ -71,31 +115,35 @@ QByteArray buildGetStreamUriRequest(const QString &profileToken)
             .arg(profileToken));
 }
 
-QByteArray buildRelativeMoveRequest(const QString &profileToken, double zoomDelta)
+// Phase 3b: PTZ/Imaging은 실제 카메라 제어라 WS-Security 인증이 붙는다 (discovery/GetProfiles류는
+// 여전히 무인증 — Phase 3b "진입 전 결정" 참고).
+QByteArray buildRelativeMoveRequest(const QString &profileToken, double zoomDelta, const QString &username, const QString &password)
 {
-    return wrapSoapRequest(
-        QStringLiteral("<tptz:RelativeMove xmlns:tptz=\"http://www.onvif.org/ver20/ptz/wsdl\">"
-                        "<tptz:ProfileToken>%1</tptz:ProfileToken>"
-                        "<tptz:Translation>"
-                        "<tt:PanTilt xmlns:tt=\"http://www.onvif.org/ver10/schema\" x=\"0\" y=\"0\"/>"
-                        "<tt:Zoom xmlns:tt=\"http://www.onvif.org/ver10/schema\" x=\"%2\"/>"
-                        "</tptz:Translation>"
-                        "</tptz:RelativeMove>")
-            .arg(profileToken, QString::number(zoomDelta, 'f', 4)));
+    const QString body = QStringLiteral(
+        "<tptz:RelativeMove xmlns:tptz=\"http://www.onvif.org/ver20/ptz/wsdl\">"
+        "<tptz:ProfileToken>%1</tptz:ProfileToken>"
+        "<tptz:Translation>"
+        "<tt:PanTilt xmlns:tt=\"http://www.onvif.org/ver10/schema\" x=\"0\" y=\"0\"/>"
+        "<tt:Zoom xmlns:tt=\"http://www.onvif.org/ver10/schema\" x=\"%2\"/>"
+        "</tptz:Translation>"
+        "</tptz:RelativeMove>")
+        .arg(profileToken, QString::number(zoomDelta, 'f', 4));
+    return wrapSoapRequestWithSecurity(body, username, password);
 }
 
-QByteArray buildImagingMoveRequest(const QString &videoSourceToken, double focusDelta)
+QByteArray buildImagingMoveRequest(const QString &videoSourceToken, double focusDelta, const QString &username, const QString &password)
 {
-    return wrapSoapRequest(
-        QStringLiteral("<timg:Move xmlns:timg=\"http://www.onvif.org/ver20/imaging/wsdl\">"
-                        "<timg:VideoSourceToken>%1</timg:VideoSourceToken>"
-                        "<timg:Focus>"
-                        "<timg:Relative xmlns:tt=\"http://www.onvif.org/ver10/schema\">"
-                        "<tt:Distance>%2</tt:Distance>"
-                        "</timg:Relative>"
-                        "</timg:Focus>"
-                        "</timg:Move>")
-            .arg(videoSourceToken, QString::number(focusDelta, 'f', 4)));
+    const QString body = QStringLiteral(
+        "<timg:Move xmlns:timg=\"http://www.onvif.org/ver20/imaging/wsdl\">"
+        "<timg:VideoSourceToken>%1</timg:VideoSourceToken>"
+        "<timg:Focus>"
+        "<timg:Relative xmlns:tt=\"http://www.onvif.org/ver10/schema\">"
+        "<tt:Distance>%2</tt:Distance>"
+        "</timg:Relative>"
+        "</timg:Focus>"
+        "</timg:Move>")
+        .arg(videoSourceToken, QString::number(focusDelta, 'f', 4));
+    return wrapSoapRequestWithSecurity(body, username, password);
 }
 
 QByteArray buildProbeRequest()
@@ -373,6 +421,8 @@ void OnvifLiteClient::relativeMove(
     const QString &xaddr,
     const QString &profileToken,
     double zoomDelta,
+    const QString &username,
+    const QString &password,
     QObject *context,
     std::function<void(bool ok, const QString &errorMessage)> callback)
 {
@@ -381,7 +431,7 @@ void OnvifLiteClient::relativeMove(
     }
     postSoap(
         xaddr,
-        buildRelativeMoveRequest(profileToken, zoomDelta),
+        buildRelativeMoveRequest(profileToken, zoomDelta, username, password),
         context,
         [callback](bool ok, const QByteArray & /*responseBody*/, const QString &errorMessage) {
             callback(ok, errorMessage);
@@ -392,6 +442,8 @@ void OnvifLiteClient::imagingRelativeMove(
     const QString &xaddr,
     const QString &videoSourceToken,
     double focusDelta,
+    const QString &username,
+    const QString &password,
     QObject *context,
     std::function<void(bool ok, const QString &errorMessage)> callback)
 {
@@ -400,7 +452,7 @@ void OnvifLiteClient::imagingRelativeMove(
     }
     postSoap(
         xaddr,
-        buildImagingMoveRequest(videoSourceToken, focusDelta),
+        buildImagingMoveRequest(videoSourceToken, focusDelta, username, password),
         context,
         [callback](bool ok, const QByteArray & /*responseBody*/, const QString &errorMessage) {
             callback(ok, errorMessage);

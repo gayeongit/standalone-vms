@@ -93,6 +93,18 @@ Phase 1/2가 끝난 뒤 ONVIF 실제 통신 흐름을 다룬 외부 자료를 �
 
 **수정**: `OnvifLiteClient`가 `GetDeviceInformation` 다음에 `GetCapabilities`를 호출해 Media/PTZ/Imaging XAddr을 각각 파싱하고, 이후 호출을 그 주소로 보내도록 변경. 검증을 위해 mock도 세 서비스 주소를 일부러 다른 경로(`/onvif/media_service`, `/onvif/ptz_service`, `/onvif/imaging_service`)로 응답하게 만들어서, 클라이언트가 실제로 그 주소를 따라가는지(하드코딩된 재사용이 아닌지) 확인했다.
 
+### 2.6 카메라별 자격증명을 로컬에 캐싱 — discovery는 무인증, 실제 사용 시점에만 인증 (Phase 3b)
+
+지금까지는 discovery(장치/채널 조회)에도 제어(zoom/focus)에도 인증이 전혀 없었다. 실제 ONVIF 카메라를 쓰려면 어딘가에 ID/PW가 들어가야 하는데, 이걸 어느 시점에 요구할지가 설계 지점이었다.
+
+**결정**: discovery(`GetDeviceInformation`/`GetCapabilities`/`GetProfiles`/`GetStreamUri`)는 계속 무인증으로 유지하고, **실제로 그 장치를 "쓰는" 시점 두 곳에만** 인증을 건다 — RTSP 영상 연결(`rtsp://id:pw@host/path`)과 PTZ/Imaging 제어(WS-Security `UsernameToken`). 채널 트리는 로그인 여부와 무관하게 항상 그려지고, 실제로 장치를 선택해서 쓸 때만 자격증명을 요구하는 구조다.
+
+**구현**: 디바이스별 ID/PW 입력 모달(`DeviceCredentialDialog`)을 신설하고, 자격증명 저장은 두 계층으로 분리했다 — 게스트는 세션 메모리(`AppState`)에만 휘발성으로 캐싱, 로그인 상태는 QtKeychain(OS 네이티브 자격증명 저장소)에 영구 저장. QtKeychain은 시스템에 별도 설치 없이 CMake `FetchContent`로 소스를 받아 같이 빌드했다.
+
+**mock도 인증을 실제로 거부하게 만들었다.** 이 검증이 의미 있으려면 mock이 "인증하는 척"이 아니라 진짜로 틀린 자격증명을 거부해야 한다고 판단해서, `onvif_mock`은 WS-Security digest(Nonce+Created+Password로 계산한 SHA1)를 직접 재계산해서 비교하고, `mediamtx`는 자체 `authInternalUsers` 기능으로 RTSP 인증을 검사하게 설정했다. 틀린 ID/PW를 넣으면 실제로 SOAP 401과 RTSP 인증 실패가 발생한다.
+
+**UX 재조정.** 처음엔 틀린 자격증명으로도 일단 Main에 진입시키고 그 채널만 "연결 안 됨" 상태로 남기는 방식으로 구현했는데(추가 코드 없이 기존 그레이스풀 디그레이드 동작 재사용), 실제로 써보니 "선택된 채널처럼 보이는데 계속 깨져 있는" 모양이 오히려 헷갈렸다. 재시도 모달 같은 새 UI를 추가하는 건 과하다고 판단해서, 대신 모달에서 새로 입력한 자격증명만 대표 채널 PTZ로 `RelativeMove(delta=0)` "ping"을 한 번 날려 즉시 검증하고, 틀리면 기존 "RTSP 조회 실패" 채널과 똑같이 그리드 배정 단계에서 제외하는 쪽으로 바꿨다. 화면 계층(`MainScreen`)은 이번에도 한 줄도 안 건드렸다 — `finalize()`가 채널을 그리드에 배정하기 전 단계에서 걸러내는 것으로 해결했다.
+
 ---
 
 ## 3. 기술적으로 신경 쓴 지점
@@ -115,13 +127,13 @@ Phase 1/2가 끝난 뒤 ONVIF 실제 통신 흐름을 다룬 외부 자료를 �
 | 채널 목록/상세 조회 | 별도 엔드포인트 2단계 | ONVIF `GetProfiles` 한 번으로 통합 |
 | zoom/focus 제어 | 서버 REST 프록시(POST+JSON body) | 서버 상태와 무관하게 카메라로 직접 ONVIF PTZ/Imaging SOAP |
 | ONVIF 서비스 주소 사용 | Device Service 주소를 Media/PTZ/Imaging에도 하드코딩 재사용 | `GetCapabilities`로 서비스별 실제 주소를 얻어 그 주소로 호출 |
+| 카메라 자격증명 | 서버가 대신 인증, VMS는 자격증명을 몰라도 됨 | discovery는 무인증 유지, RTSP/PTZ 사용 시점에만 요구 — 게스트는 세션 휘발성, 로그인은 QtKeychain 영구 저장 |
 | 화면/미디어 계층 코드 | — | 무수정 (서비스 인터페이스 유지 원칙) |
 
 ---
 
 ## 5. 남은 작업
 
-- **Phase 3b** — 카메라별 로그인 자격증명을 QtKeychain으로 로컬 캐싱 (디바이스 선택 후 Main 진입 전 ID/PW 모달, 게스트=휘발성/회원=영구 저장)
 - **Phase 4** — UDP 브로드캐스트 이벤트를 서버 없이 직접 수신
 - **Phase 5(선택)** — Playback을 mediamtx 기반으로 전환
 - **Phase 6** — 통합 검증 + 최종 문서/발표자료 정리

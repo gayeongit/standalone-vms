@@ -45,6 +45,7 @@ private:
     void rebuildRuntimeScreens();
     void destroyRuntimeScreens();
     void createRuntimeScreens(std::function<void()> openSettingsHandler);
+    void runDeviceSelectionPipeline(std::function<void()> showSettingsDialog, const QVector<SelectedChannelContext> &normalized);
     void handleLogoutRequest();
     void handleUnauthorized();
     void clearAuthenticationState();
