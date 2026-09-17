@@ -316,7 +316,97 @@ Phase 3b 완료.
 
 ---
 
+## Phase 3b 안정화 패치 (Phase 4 진입 전)
+
+### 배경 (2026-09-16)
+
+Phase 3b 완료 후, 코덱스에게 지금까지의 구현을 리뷰받아 `docs/code_review_stabilization_plan.md`로 정리했다. 결론은: Phase 0~3b의 핵심 방향(서버 의존성 제거, AppState 접점, 서비스 인터페이스 유지)은 잘 맞고 있지만, "목업 기준으로는 통과하지만 실제로는 문제가 되는" 항목들이 남아있어 Phase 4 진입 전에 안정화가 필요하다는 것.
+
+리뷰에서 나온 항목 중 자동 테스트(Qt Test 도입, 리뷰의 4.3)은 스코프에서 제외하기로 결정 — 개인 포트폴리오 프로젝트 속도 대비 투자 가치가 낮다고 판단. 나머지는 아래처럼 우선순위를 나눠서 진행한다.
+
+### 현재 구조 확인 결과 (코드로 직접 검증)
+
+작업 들어가기 전에 리뷰의 핵심 주장들을 코드로 재확인했다 — 셋 다 정확했다.
+
+1. **서버 설정 게이팅**: `loadAppConfig()`(`src/app/app_config_loader.cpp`)는 `apiBaseUrl`이 비어 있으면 그 자리에서 `false`를 반환하고, `MainWindow::initializeAuthServices()`(`src/app/mainwindow_auth.cpp`)는 그 즉시 리턴해서 `OnvifLiteClient`/`DeviceService`/`CctvControlService`를 **아예 만들지 않는다.** 지금까지 게스트 플로우가 잘 됐던 건 이 개발 머신에 `apiBaseUrl`이 채워진(팀 서버 주소) `app_config.json`이 로컬에 남아있어서 가려져 있던 것뿐 — 클린 체크아웃이면 "서버 없이 동작"이 그 자리에서 깨진다.
+2. **WS-Security `Created`에 `Z`가 두 번 붙음**: `QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)`가 이미 UTC `Z`를 붙이는데(`onvif_lite_client.cpp:59`) 코드가 또 붙인다. mock은 `Created` 형식을 검증 안 해서 지금은 안 드러남.
+3. **PTZ/Imaging 토큰 혼용**: `CctvControlService::requestControl`(`cctv_control_service.cpp:78-116`)이 `channelOnvifProfileTokenById`(Media Profile 토큰)를 `relativeMove`(PTZ, 맞음)와 `imagingRelativeMove`(Imaging, 원래는 `VideoSourceToken`이어야 함)에 똑같이 넘긴다. mock이 토큰 종류를 검증 안 해서 지금은 안 드러남.
+
+추가로 직접 확인한 것:
+
+- `RestClient::requestJson`(`rest_client.cpp:129-136`)은 `context == nullptr`이면 `QPointer` guard가 항상 falsy가 되어 콜백을 무조건 버린다. 반면 `DeviceService::dispatchAsync`(`device_service.cpp:119-128`)와 `OnvifLiteClient`는 `if (context && !guard) return;` 패턴이라 `context == nullptr`을 "가드 없음, 항상 실행"으로 해석한다 — 같은 프로젝트 안에서 두 가지 다른 의미로 쓰이고 있음.
+- 설정 화면의 "장치 관리" 탭(`settings_dialog.cpp`)은 `QSettings("TeamClue", "VMS_v1")`에 이름/타입/RTSP URL을 저장하지만, 런타임은 `configuredDeviceNames()`(`mainwindow.cpp:98-110`)가 `AppState.selectedChannelContexts`(ONVIF discovery 결과)만 읽는다 — 두 데이터가 완전히 분리되어 있어 이 탭에서 뭘 하든 실제 화면에는 반영되지 않는 순수 no-op.
+- 로그아웃(`clearAuthenticationState`, `mainwindow_auth.cpp:696`)과 초기화(`initializeState`, `mainwindow.cpp`) 둘 다 `channelRtspByName/Id`는 지우는데 `channelVideoCodecByName/Id`는 안 지운다 — 이전 세션의 코덱 매핑이 남아서 다음 세션에 같은 displayName/channelId가 재사용되면 잘못된 코덱으로 붙을 수 있음.
+- `DeviceCheckScreen::reloadDevices()`(`login_screen.cpp:687-746`)의 `pump`/`fetchDeviceWithRetry`(둘 다 `QSharedPointer<std::function<...>>`)가 서로의 캡처 리스트에 서로(+자기 자신)를 강한 참조로 들고 있어 순환 참조가 생긴다 — 새로고침마다 작지만 실제로 해제 안 되는 메모리 누수. 크래시/즉각적 문제는 아니지만 구조적으로 틀림.
+- `DeviceCredentialDialog`(`device_credential_dialog.cpp`)는 OK 버튼이 `QDialog::accept`에 직결되어 있어 아이디/비번을 비워둔 채로도 확인이 눌린다.
+- `CredentialStore::save()`(`credential_store.cpp:65-73`)는 QtKeychain 쓰기 실패를 완전히 무시한다(`void` 반환, `job.error()` 안 봄) — 실패해도 사용자는 "저장됐다"고 믿게 됨.
+
+### 스코프 결정
+
+**지금 한다** (아래 작업 목록):
+- 리뷰 4.1 — 서버 설정 없이 로컬 카메라 서비스 초기화
+- 리뷰 4.2 중 공짜로 고쳐지는 것만 — `Created` 이중 `Z`, WS-Security/SOAP 요청의 XML escape 누락
+- 리뷰 4.4 — 장치 관리 탭의 no-op 상태 정리(UGV와 같은 패턴: 비활성화 + 사유 명시, 삭제/재설계 여부는 Phase 6에서 최종 결정)
+- 리뷰 4.5 전체 — 코덱 캐시 누락, 순환 참조, RestClient null-context 불일치, 자격증명 모달 빈 값 검증, QtKeychain 오류 전파
+
+**지금 안 한다 (명시적 보류)**:
+- 리뷰 4.3(Qt Test 자동화 기반 도입) — 사용자 결정으로 스코프 제외.
+- 리뷰 4.2 중 구조적인 것(SOAP 파싱을 `QXmlStreamReader`로 전면 교체, PTZ `ProfileToken`/Imaging `VideoSourceToken` 실제 분리) — 클라이언트+mock 양쪽을 다 고쳐야 하는 규모라 Phase 3b 안정화 패치보다 큰 작업. **실제 ONVIF 카메라로 테스트할 시점**으로 미룬다. mock 대상으로만 검증하는 현 단계에서는 CLAUDE.md의 "ONVIF 풀스펙 구현 안 함" 스코프와도 맞음.
+- 리뷰 4.2/8절의 나머지 실제-카메라 호환성 항목, Phase 5/6 섹션(다운로드 보안 경계, AppState 분해, 대형 파일 분할 등)은 `docs/code_review_stabilization_plan.md`에 그대로 남겨두고 해당 Phase 진입 시 재확인.
+
+### 작업 목록
+
+1. `app_config_loader.cpp` — `apiBaseUrl`이 없어도 파일을 계속 파싱해서 `device`/`event`/`playback`/`ugv` 등 나머지 필드는 채우도록 변경. 반환값은 "서버 설정이 유효한지"만 의미하도록 유지(파일 누락/파싱 실패/apiBaseUrl 없음 → `false`, 나머지는 `true`).
+2. `mainwindow_auth.cpp`의 `initializeAuthServices()` — `RestClient`/`OnvifLiteClient`/`DeviceService`/`CctvControlService` 생성을 `loadAppConfig()` 성공 여부와 무관하게 항상 수행하도록 재배치하고, `AuthService`/`PlaybackService`/`UgvService`/`EventService`/`WsClient`(서버 전용)만 성공 시에만 생성. `state.authConfigReady`/`m_authInfraReady`는 지금처럼 "서버 인증 가능 여부"만 의미.
+3. `app_config.example.json` 신규 커밋(현재 `app_config.json`은 `.gitignore`됨) + `README.md`에 설정 파일 생성법과 게스트 실행 경로 한 줄 정리.
+4. `onvif_lite_client.cpp` — `buildWsSecurityHeader`의 `Created`에서 중복 `Z` 제거. `username`/`profileToken`/`videoSourceToken`을 SOAP 본문에 넣기 전 XML escape하는 헬퍼 추가.
+5. `settings_dialog.cpp` — "장치 관리" 탭 비활성화(입력/버튼 disable) + "이 목록은 현재 런타임에 반영되지 않습니다" 안내 라벨. 탭 자체는 남겨두되(UGV 스텁과 동일 패턴) 삭제/재설계는 Phase 6로.
+6. `mainwindow_auth.cpp`/`mainwindow.cpp` — `clearAuthenticationState()`/`initializeState()`에 `channelVideoCodecByName.clear()`/`channelVideoCodecById.clear()` 추가.
+7. `login_screen.cpp`의 `reloadDevices()` — `pump`/`fetchDeviceWithRetry` 순환 참조 제거. **(구현 시 계획 변경)** 별도 QObject 헬퍼 대신, fan-out 상태(devices/contexts/nextIndex/inFlight/completed/hadError)를 `DeviceCheckScreen`의 멤버로 두고 `pump`/`fetchDeviceWithRetry`/`finish`를 멤버 함수로 바꾸는 방식으로 구현 — `DeviceService::dispatchAsync`가 이미 `context`(=`DeviceCheckScreen* this`) 파괴 시 콜백을 걸러주므로, 콜백이 실행되는 시점엔 `this`가 항상 유효하다는 게 보장되어 있어 별도 QObject/`deleteLater()` 없이도 안전함. reload 세대(`m_reloadGeneration`) 검사를 상태 변경 전에 먼저 하기 때문에, 새 `reloadDevices()` 호출이 이전 fan-out의 멤버 상태를 재사용해도 stale callback이 섞이지 않음.
+8. `rest_client.cpp`의 `requestJson()` — guard 체크를 `if (context && !guard) { ...; return; }` 패턴으로 바꿔 `DeviceService`/`OnvifLiteClient`와 동일한 "null context = 가드 없음" 의미로 통일.
+9. `device_credential_dialog.cpp` — 아이디가 비어 있으면 OK 버튼 비활성화(`QLineEdit::textChanged`로 갱신).
+10. `credential_store.cpp` — `save()`가 `bool`(또는 성공 여부)을 반환하도록 변경, 두 키 중 하나라도 쓰기 실패하면 실패로 처리. 호출부(`mainwindow_auth.cpp`)에서 실패 시 팝업으로 알림.
+11. 빌드 확인 + 사용자 게이트 테스트(클린 설정으로 게스트 경로 재확인 포함).
+
+### 구현 완료 (2026-09-16)
+
+작업 목록 1~10 전부 반영, `VMS_v2` 빌드 성공(exit code 0, 링크까지 확인). 변경 파일: `app_config_loader.cpp`, `mainwindow_auth.cpp`, `mainwindow.cpp`, `onvif_lite_client.cpp`, `settings_dialog.cpp`, `login_screen.h/.cpp`, `rest_client.cpp`, `device_credential_dialog.h/.cpp`, `credential_store.h/.cpp`, 신규 `app_config.example.json`, `README.md` 갱신.
+
+### 완료 기준 / 게이트 테스트
+
+- [x] 빌드 성공 (`VMS_v2`, exit code 0)
+- [x] `app_config.json`을 다른 폴더로 옮겨도(=없는 상태) 게스트 → DeviceCheck → ONVIF discovery → Main 진입이 그대로 동작, RTSP 재생 확인 — 사용자 확인 완료 (2026-09-17)
+- [x] 그 상태에서 로그인 화면은 "설정 오류" 문구를 보여주되 게스트 버튼은 계속 활성 — 사용자 확인 완료 (2026-09-17)
+- [x] 자격증명 모달에서 아이디를 비운 채로는 OK가 안 눌리는지 — 사용자 확인 완료
+- [x] 기존 Phase 3b 동작(정상/틀린 자격증명, PTZ/RTSP) 회귀 없는지 — 사용자 확인 완료 (정상 입력 시 영상+PTZ 정상, 틀린 입력 시 해당 디바이스 그리드 미배정)
+- [x] 설정 화면의 "장치 관리" 탭이 비활성화되고 안내 문구가 보이는지 — 사용자 확인 완료
+
+### 게이트 테스트 중 추가로 발견/수정한 것 (2026-09-17)
+
+실제로 사용자가 위 테스트를 진행하면서 이번 안정화 패치 작업 범위에는 없었지만 같이 드러난 버그 4개. 전부 수정 후 재확인 완료:
+
+1. **빌드 자체가 깨짐**: `app_config.json`을 지운 뒤 재빌드하면 CMake의 `app_config.json` 복사 스텝이 실패해 빌드가 중단됨 — `if(EXISTS...)`가 configure 시점에만 평가되어 그 이후 파일이 사라지는 경우를 못 봄. `CMakeLists.txt`의 POST_BUILD 커맨드를 `cmd /c if exist ...`로 바꿔서 빌드 시점마다 확인하도록 수정.
+2. **디바이스 자격증명 모달 취소 시 엉뚱하게 Main 진입**: 취소한 디바이스만 선택에서 제외하고 나머지로 진행하는 구조였는데, 선택한 디바이스가 하나뿐이면 결과가 "0개 선택"과 똑같아져서 Phase 3a의 "0개 선택도 정상 진입" 규칙에 걸려 그대로 Main으로 들어가 버림. 모달 취소 시 "VMS 시작" 자체를 취소하고 DeviceCheckScreen에 남도록 수정 ([mainwindow_auth.cpp:219-222](../src/app/mainwindow_auth.cpp)).
+3. **게스트/로그아웃 후 로그인 화면으로 돌아오면 설정 오류 상태가 사라짐**: `configureLoginScreenState()`가 앱 시작 시 한 번만 호출되고, 이후 로그인 화면으로 돌아오는 4개 경로(게스트 뒤로가기, 회원가입 취소/완료 후 복귀, 로그아웃)는 전부 `resetLoginInputs()`만 호출해서 로그인/회원가입 버튼을 무조건 재활성화하고 있었음. 4곳 다 `configureLoginScreenState()`를 부르도록 통일(입력값은 계속 초기화하면서 설정 오류 상태는 유지).
+4. **설정 오류 상태에서 회원가입 버튼은 계속 활성화됨**: `LoginScreen::showConfigError()`가 로그인 버튼만 비활성화하고 회원가입 버튼은 안 건드리고 있었음(회원가입도 서버가 있어야 되는 기능인데 누락) — 같이 비활성화하도록 수정.
+5. (부수적으로) 긴 에러 문구가 로그인 화면에서 잘려 보이던 것도 짧은 한 줄로 축약, 상세 경로는 `qWarning()` 로그로만 남김.
+
+### 2차 코드 리뷰 (코덱스) 결과 반영 (2026-09-17)
+
+패치를 닫기 전에 다시 코드 리뷰를 받았다. 주장 중 하나는 직접 검증해보니 틀렸고, 나머지는 맞아서 반영했다.
+
+- **틀림 — "app_config.json 없으면 QtKeychain DLL 복사도 `&&`로 스킵된다"**: 생성된 `build.ninja`는 `바깥 cmd.exe /C "... && cmd /c \"if exist ...\" && ..."` 형태의 중첩 구조다. 안쪽 `cmd /c "if exist FILE (복사)"` 자체가 하나의 완결된 명령이고, 조건이 거짓이라 아무 것도 안 해도 그 명령의 exit code는 0이다(`cmd /c "if exist 없는파일 echo hi"`를 직접 실행해 확인) — 그래서 바깥쪽 `&&`가 다음 QtKeychain 복사로 계속 진행된다. (참고: 만약 `if exist FILE cmd1 && cmd2`처럼 하나의 cmd 호출 안에 전부 들어있었다면 조건이 거짓일 때 `cmd2`도 `if`의 결과절에 묶여서 같이 안 실행됐을 것 — 우리 경우는 그 구조가 아니라서 안전했다.) 결론적으로 QtKeychain DLL 복사는 스킵되지 않는다.
+- **맞음, 그리고 더 심각했음 — "삭제 안 됨"**: `app_config.json`을 지워도 `build/app_config.json`(이전 복사본)이 안 지워지는 것 자체는 맞았다. 직접 재현해보니 원인이 리뷰가 지적한 것보다 하나 더 있었다 — `POST_BUILD`로 `VMS_v2` 타깃에 커맨드를 붙이면, 소스 변경이 없어 relink가 안 일어나는 재빌드에서는 ninja가 그 커맨드 체인 자체를 스킵해버려서 "파일만 지우고 소스는 안 건드린 채 재빌드"하는 시나리오에서 정리가 전혀 안 됨. 출력 추적이 없는 별도 `add_custom_target(sync_app_config ALL ...)`로 분리하고 `add_dependencies(VMS_v2 sync_app_config)`로 항상 실행되게 고침. 원본이 없으면 출력 폴더의 복사본도 지우도록(이전엔 스킵만 하고 안 지웠음) 같이 수정. 복사/삭제 양쪽 다 재현 테스트로 확인.
+- **맞음 — "틀린 자격증명을 ping 검증 전에 QtKeychain에 영구 저장"**: 로그인 상태에서 틀린 비밀번호를 입력하면 ping 검증 전에 이미 QtKeychain에 저장되고, ping 실패 시 세션 캐시만 지워서 QtKeychain에는 틀린 값이 영구히 남는 문제였음. `CredentialStore::save()` 호출을 ping 성공 콜백 안으로 옮겨서, 검증된 자격증명만 영구 저장되게 수정 ([mainwindow_auth.cpp](../src/app/mainwindow_auth.cpp)의 `relativeMove` ping 콜백).
+- **부수 반영**: 자격증명 모달의 OK 버튼 활성화 조건에 비밀번호도 포함(기존엔 아이디만 검사). 이 문서(작업 목록 7번)의 "QObject 헬퍼로 교체" 표현이 실제 구현(멤버 함수/멤버 상태 방식)과 안 맞아서 문구 수정.
+- **동의하되 지금 안 함**: 자격증명 두 키(username/password) 저장이 원자적이지 않은 문제(한쪽만 실패해도 롤백 없음)는 리뷰가 맞게 짚었지만, `docs/code_review_stabilization_plan.md` 8절에 이미 Phase 6 대상으로 기록되어 있던 항목이라 지금 범위에는 안 넣음. `device.source=server`인데 `apiBaseUrl`이 비었을 때의 에러 메시지 개선은 실제로 발생할 일이 없는 자기모순적 설정 조합이라 우선순위 낮음으로 보류.
+- **추가로 짚어준 비차단 항목(3차 리뷰, 2026-09-17)**: QtKeychain에서 로드된 자격증명은 "이미 검증된 것"으로 취급해 ping 재검증을 안 한다 — 카메라 비밀번호가 나중에 바뀌거나 예전에 잘못 저장된 값이 있으면, 재입력 모달 없이 계속 조용히 실패(RTSP/PTZ 인증 실패)만 반복될 수 있다. 로그인 상태 자체가 이 환경에서 테스트 불가능해서 지금 오염된 값이 있을 수도 없고, 고치려면 캐시 히트도 매번 ping 검증하게 만들어야 하는데 그건 Phase 3b가 의도적으로 피한 "매번 네트워크 왕복" 비용을 다시 불러온다 — 트레이드오프라 지금은 기록만 해두고 실제 로그인 경로가 생기는 시점(서버 연동 또는 Phase 6)에 다시 판단.
+
+Phase 3b 안정화 패치 완료.
+
+---
+
 ## 다음 Phase 메모
 
-- Phase 3b 착수. 위 작업 순서대로 구현 진행.
-- 이후 Phase 4 → 5(선택) → 6 순으로 진행.
+- Phase 3b 안정화 패치 완료 (2026-09-17). 다음은 Phase 4(이벤트 직접 수신 경로).
+- 이후 Phase 4 → 5(선택) → 6 순으로 진행. Phase 5/6 착수 시 `docs/code_review_stabilization_plan.md`의 해당 섹션(다운로드 보안 경계, AppState 분해 등) 재확인.

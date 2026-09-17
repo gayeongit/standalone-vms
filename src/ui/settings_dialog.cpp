@@ -98,6 +98,16 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     deviceLayout->addLayout(deviceBtns);
     tabs->addTab(devicePage, "장치 관리");
 
+    // 이 탭은 QSettings("TeamClue","VMS_v1")에만 저장되고 런타임(AppState.selectedChannelContexts,
+    // ONVIF discovery 결과)과는 완전히 분리되어 있어 여기서 뭘 바꿔도 실제 화면엔 반영되지 않는다.
+    // 수동 RTSP 장치 지원 여부는 Phase 6에서 결정 — 그 전까지는 UGV와 동일하게 비활성화로 대응.
+    auto *deviceDisabledNotice = new QLabel(
+        "이 탭은 현재 런타임 채널 목록과 연동되어 있지 않습니다 (비활성화됨).", devicePage);
+    deviceDisabledNotice->setWordWrap(true);
+    deviceDisabledNotice->setStyleSheet("color: #F37321;");
+    deviceLayout->insertWidget(0, deviceDisabledNotice);
+    devicePage->setEnabled(false);
+
     auto devices = std::make_shared<QVector<ManagedDeviceEntry>>(loadManagedDevices());
     auto refreshDeviceList = [deviceList, devices]() {
         deviceList->clear();

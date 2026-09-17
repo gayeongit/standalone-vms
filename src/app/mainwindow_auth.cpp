@@ -155,9 +155,7 @@ void MainWindow::setupConnections()
             PopupManager::showInfo(this, "계정", "회원가입이 완료되었습니다. 로그인해 주세요.");
             m_signupScreen->clearSignupStatus();
             m_signupScreen->resetSignupInputs();
-            if (m_loginScreen) {
-                m_loginScreen->resetLoginInputs();
-            }
+            configureLoginScreenState();
             showScreen(ScreenId::Login);
         });
     });
@@ -166,9 +164,7 @@ void MainWindow::setupConnections()
             m_signupScreen->clearSignupStatus();
             m_signupScreen->resetSignupInputs();
         }
-        if (m_loginScreen) {
-            m_loginScreen->resetLoginInputs();
-        }
+        configureLoginScreenState();
         showScreen(ScreenId::Login);
     });
 
@@ -183,8 +179,9 @@ void MainWindow::setupConnections()
 
         // Phase 3b: 선택된 채널들의 디바이스(deviceIp 기준)마다 자격증명이 세션 캐시에 있는지 확인.
         // discovery/트리 조회 자체는 무인증이라 여기서 처음 걸린다 — RTSP 재생/PTZ 제어에만 필요.
-        // 로그인 상태면 QtKeychain을 먼저 보고, 없으면 모달. 모달을 취소하면 그 디바이스의
-        // 채널은 이번 선택에서 제외한다.
+        // 로그인 상태면 QtKeychain을 먼저 보고, 없으면 모달. 모달을 취소하면 "VMS 시작" 자체를
+        // 취소한 것으로 보고 DeviceCheckScreen에 그대로 남긴다 — 취소했는데도 다른 장치만으로
+        // Main에 진입되는 건(예전 동작) 사용자가 기대하는 "취소" 의미와 맞지 않아서 바꿈.
         //
         // 모달에 새로 입력한 값(캐시/키체인에서 가져온 게 아닌 것)은 대표 채널 하나로 PTZ에
         // delta=0 "ping"을 날려 맞는지 바로 검증한다. 틀리면 캐시에서 지우고, 그 디바이스는
@@ -192,7 +189,6 @@ void MainWindow::setupConnections()
         // "연결 안 됨" 상태로 그리드에 남는 대신 아예 안 보이게(선택 안 한 것처럼) 처리한다.
         m_deviceScreen->setEnabled(false);
 
-        QSet<QString> rejectedIps;
         QSet<QString> freshlyEnteredIps;
         {
             auto &credentialState = AppState::instance();
@@ -217,14 +213,14 @@ void MainWindow::setupConnections()
                 const QString label = ctx.displayName.trimmed().isEmpty() ? deviceIp : ctx.displayName.trimmed();
                 DeviceCredentialDialog dialog(label, this);
                 if (dialog.exec() != QDialog::Accepted) {
-                    rejectedIps.insert(deviceIp);
-                    continue;
+                    m_deviceScreen->setEnabled(true);
+                    return;
                 }
                 credentialState.deviceCredentialUsernameByIp.insert(deviceIp, dialog.username());
                 credentialState.deviceCredentialPasswordByIp.insert(deviceIp, dialog.password());
-                if (credentialState.isAuthenticated) {
-                    CredentialStore::save(deviceIp, dialog.username(), dialog.password());
-                }
+                // QtKeychain 영구 저장은 여기서 바로 하지 않는다 — 틀린 자격증명을 저장해버리면
+                // 다음 실행에서도 계속 그 틀린 값을 "이미 검증된 것"으로 취급해 재입력 기회 자체가
+                // 없어진다. ping 검증이 성공한 뒤(아래 pump 루프)에만 저장한다.
                 freshlyEnteredIps.insert(deviceIp);
             }
         }
@@ -240,13 +236,12 @@ void MainWindow::setupConnections()
             representativeChannelIdByIp.insert(deviceIp, ctx.channelId);
         }
 
-        auto proceedWithCredentials = [this, showSettingsDialog, normalized, rejectedIps](const QSet<QString> &pingFailedIps) {
+        auto proceedWithCredentials = [this, showSettingsDialog, normalized](const QSet<QString> &pingFailedIps) {
             QVector<SelectedChannelContext> credentialFiltered;
             credentialFiltered.reserve(normalized.size());
-            auto &credentialState = AppState::instance();
             for (const auto &ctx : normalized) {
                 const QString deviceIp = ctx.deviceIp.trimmed();
-                if (!deviceIp.isEmpty() && (rejectedIps.contains(deviceIp) || pingFailedIps.contains(deviceIp))) {
+                if (!deviceIp.isEmpty() && pingFailedIps.contains(deviceIp)) {
                     continue;
                 }
                 credentialFiltered.push_back(ctx);
@@ -284,12 +279,19 @@ void MainWindow::setupConnections()
                 const QString username = state.deviceCredentialUsernameByIp.value(deviceIp);
                 const QString password = state.deviceCredentialPasswordByIp.value(deviceIp);
                 m_onvifLiteClient->relativeMove(detail.onvifPtzXAddr, detail.onvifProfileToken, 0.0, username, password, this,
-                    [deviceIp, pingPending, pingFailedIps, proceedWithCredentials](bool ok, const QString &/*errorMessage*/) {
+                    [this, deviceIp, username, password, pingPending, pingFailedIps, proceedWithCredentials](bool ok, const QString &/*errorMessage*/) {
+                        auto &state = AppState::instance();
                         if (!ok) {
-                            auto &state = AppState::instance();
                             state.deviceCredentialUsernameByIp.remove(deviceIp);
                             state.deviceCredentialPasswordByIp.remove(deviceIp);
                             pingFailedIps->insert(deviceIp);
+                        } else if (state.isAuthenticated) {
+                            // ping이 성공한 뒤에만 QtKeychain에 영구 저장한다 — 검증 전에 저장하면
+                            // 틀린 자격증명이 "이미 확인된 것"으로 영구히 남는다.
+                            if (!CredentialStore::save(deviceIp, username, password)) {
+                                PopupManager::showInfo(this, "장치 인증",
+                                    QStringLiteral("\"%1\" 자격증명을 영구 저장하지 못했습니다. 이번 세션에서는 계속 사용되지만, 다음 실행 시 다시 입력해야 합니다.").arg(deviceIp));
+                            }
                         }
                         *pingPending -= 1;
                         if (*pingPending <= 0) {
@@ -300,9 +302,7 @@ void MainWindow::setupConnections()
         }
     });
     connect(m_deviceScreen, &DeviceCheckScreen::backToLoginRequested, this, [this]() {
-        if (m_loginScreen) {
-            m_loginScreen->resetLoginInputs();
-        }
+        configureLoginScreenState();
         showScreen(ScreenId::Login);
     });
 
@@ -535,16 +535,14 @@ bool MainWindow::initializeAuthServices()
     auto &state = AppState::instance();
     AppConfig config;
     QString configError;
-    if (!loadAppConfig(&config, &configError)) {
-        state.authConfigReady = false;
-        state.authConfigError = configError;
-        return false;
-    }
-
-    state.authConfigReady = true;
-    state.authConfigError.clear();
+    const bool serverConfigReady = loadAppConfig(&config, &configError);
+    state.authConfigReady = serverConfigReady;
+    state.authConfigError = serverConfigReady ? QString() : configError;
     state.apiBaseUrl = config.apiBaseUrl;
 
+    // RestClient는 서버 설정 유무와 무관하게 항상 만든다 — DeviceService가 device.source=="server"로
+    // 쓰일 수도 있어 생성자 시점에 필요하다. apiBaseUrl이 비어 있으면 이후 서버 호출은 실패 응답으로
+    // 처리될 뿐이고, 로컬 카메라(ONVIF) 경로는 이 객체와 무관하게 계속 동작한다.
     m_restClient = new RestClient(this);
     m_restClient->setBaseUrl(config.apiBaseUrl);
     m_restClient->setRequestTimeoutMs(config.requestTimeoutMs);
@@ -556,11 +554,7 @@ bool MainWindow::initializeAuthServices()
         handleUnauthorized();
     });
 
-    m_authService = new AuthService(m_restClient, this);
-    m_authService->setLoginPath(config.loginPath);
-    m_authService->setLogoutPath(config.logoutPath);
-    m_authService->setSignupPath(config.signupPath);
-
+    // 카메라 도메인 서비스는 서버 설정과 무관하게 항상 만든다 — "서버 없이 동작"이 이 프로젝트의 핵심.
     m_onvifLiteClient = new OnvifLiteClient(this);
     m_onvifLiteClient->setDiscoveryTimeoutMs(config.onvifDiscoveryTimeoutMs);
     m_onvifLiteClient->setManualXAddr(config.onvifManualXAddr);
@@ -572,6 +566,16 @@ bool MainWindow::initializeAuthServices()
     m_deviceService->setDeviceSource(config.deviceSource);
 
     m_cctvControlService = new CctvControlService(m_onvifLiteClient, this);
+
+    if (!serverConfigReady) {
+        return false;
+    }
+
+    // 아래부터는 서버 의존 서비스 — apiBaseUrl이 있어야만 의미가 있다.
+    m_authService = new AuthService(m_restClient, this);
+    m_authService->setLoginPath(config.loginPath);
+    m_authService->setLogoutPath(config.logoutPath);
+    m_authService->setSignupPath(config.signupPath);
 
     m_playbackService = new PlaybackService(m_restClient, this);
     m_playbackService->setChannelsByDatePathTemplate(config.playbackChannelsByDatePathTemplate);
@@ -669,12 +673,15 @@ void MainWindow::configureLoginScreenState()
     // 즉 로그인 가능 상태면 입력/상태를 초기화하고, 아니면 설정 오류 문구를 화면에 남긴다.
     // 따라서 단순 입력 초기화가 아니라, 설정 파일 오류를 사용자에게
     // 로그인 불가 사유로 보여주는 마지막 안전망 역할을 맡는다.
+    //
+    // 앱 시작 시점뿐 아니라 게스트/로그아웃 등으로 Login 화면에 "돌아올" 때도 다시 호출해야
+    // 한다 — resetLoginInputs()가 로그인/회원가입 버튼을 무조건 다시 활성화하기 때문에,
+    // 여기서 그 뒤에 authInfraReady 상태를 한 번 더 덮어써야 설정 오류 상태가 유지된다.
     if (!m_loginScreen) {
         return;
     }
+    m_loginScreen->resetLoginInputs();
     if (m_authInfraReady) {
-        m_loginScreen->setLoginInProgress(false);
-        m_loginScreen->clearLoginStatus();
         return;
     }
 
@@ -713,6 +720,8 @@ void MainWindow::clearAuthenticationState()
     state.selectedChannelContexts.clear();
     state.channelRtspByName.clear();
     state.channelRtspById.clear();
+    state.channelVideoCodecByName.clear();
+    state.channelVideoCodecById.clear();
     state.channelOnvifPtzXAddrById.clear();
     state.channelOnvifImagingXAddrById.clear();
     state.channelOnvifProfileTokenById.clear();
@@ -751,9 +760,7 @@ void MainWindow::clearAuthenticationState()
     ChannelSessionManager::instance().shutdown();
     destroyRuntimeScreens();
     m_skipNextWsRecovery = false;
-    if (m_loginScreen) {
-        m_loginScreen->resetLoginInputs();
-    }
+    configureLoginScreenState();
 }
 
 void MainWindow::handleLogoutRequest()

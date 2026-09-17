@@ -277,8 +277,12 @@ void LoginScreen::showLoginError(const QString &message)
 void LoginScreen::showConfigError(const QString &message)
 {
     showLoginError(message.trimmed().isEmpty() ? "설정 파일 오류로 로그인할 수 없습니다." : message.trimmed());
+    // 회원가입도 결국 서버(AuthService)가 있어야 되는 기능이라 로그인과 같이 막는다.
     if (m_loginButton) {
         m_loginButton->setEnabled(false);
+    }
+    if (m_signupButton) {
+        m_signupButton->setEnabled(false);
     }
 }
 
@@ -661,92 +665,92 @@ void DeviceCheckScreen::reloadDevices(int retryCount)
             return;
         }
 
-        auto devices = QSharedPointer<QVector<DeviceSummary>>::create(result.devices);
-        auto contexts = QSharedPointer<QVector<SelectedChannelContext>>::create();
-        auto nextIndex = QSharedPointer<int>::create(0);
-        auto inFlight = QSharedPointer<int>::create(0);
-        auto completed = QSharedPointer<int>::create(0);
-        auto hadError = QSharedPointer<bool>::create(false);
-        constexpr int kMaxConcurrentChannelLoads = 4;
-        constexpr int kChannelRetryDelayMs = 150;
-        auto finish = [this, contexts, hadError, reloadGeneration]() {
-            if (reloadGeneration != m_reloadGeneration) {
-                return;
-            }
-            applyDeviceTree(*contexts);
-            if (contexts->isEmpty()) {
-                showDeviceStatusMessage("채널이 없습니다.", "info");
-            } else if (*hadError) {
-                showDeviceStatusMessage(QString("일부 채널 조회 실패 (총 %1개 채널)").arg(contexts->size()), "error");
-            } else {
-                showDeviceStatusMessage(QString("채널 %1건").arg(contexts->size()), "success");
-            }
-            setUiBusy(false);
-        };
-
-        auto pump = QSharedPointer<std::function<void()>>::create();
-        auto fetchDeviceWithRetry = QSharedPointer<std::function<void(const DeviceSummary &, int)>>::create();
-
-        *pump = [this, devices, nextIndex, inFlight, completed, hadError, contexts, finish, reloadGeneration, pump, fetchDeviceWithRetry]() {
-            if (reloadGeneration != m_reloadGeneration) {
-                return;
-            }
-            while (*inFlight < kMaxConcurrentChannelLoads && *nextIndex < devices->size()) {
-                const DeviceSummary device = devices->at(*nextIndex);
-                *nextIndex += 1;
-                *inFlight += 1;
-                (*fetchDeviceWithRetry)(device, 0);
-            }
-            if (*completed >= devices->size()) {
-                finish();
-            }
-        };
-
-        *fetchDeviceWithRetry = [this, contexts, inFlight, completed, hadError, finish, reloadGeneration, pump, fetchDeviceWithRetry](const DeviceSummary &device, int attempt) {
-            m_deviceService->fetchDeviceChannels(device.deviceId, this, [this, device, attempt, contexts, inFlight, completed, hadError, finish, reloadGeneration, pump, fetchDeviceWithRetry](const DeviceChannelsResult &channelResult) {
-                if (reloadGeneration != m_reloadGeneration) {
-                    return;
-                }
-                if (!channelResult.ok && attempt < 1) {
-                    QTimer::singleShot(kChannelRetryDelayMs, this, [fetchDeviceWithRetry, device, attempt]() {
-                        (*fetchDeviceWithRetry)(device, attempt + 1);
-                    });
-                    return;
-                }
-
-                if (!channelResult.ok) {
-                    *hadError = true;
-                } else {
-                    for (const auto &channel : channelResult.channels) {
-                        SelectedChannelContext ctx;
-                        ctx.deviceId = device.deviceId;
-                        ctx.channelId = channel.channelId;
-                        ctx.channelNo = channel.channelNo;
-                        ctx.deviceIp = device.ip.trimmed();
-                        const QString channelLabel = channel.name.trimmed().isEmpty()
-                            ? (channel.channelNo >= 0 ? QString("CH%1").arg(channel.channelNo) : QString("CH"))
-                            : channel.name.trimmed();
-                        ctx.displayName = (device.channelCount > 1 || channelResult.channels.size() > 1)
-                            ? QString("%1 - %2").arg(device.name, channelLabel)
-                            : device.name;
-                        ctx.deviceType = device.type.trimmed().isEmpty() ? "UNKNOWN" : device.type.trimmed().toUpper();
-                        ctx.model = device.model;
-                        ctx.online = device.online;
-                        ctx.health = device.health.trimmed().isEmpty()
-                            ? (device.online ? "OK" : "DOWN")
-                            : device.health.trimmed();
-                        contexts->push_back(ctx);
-                    }
-                }
-
-                *completed += 1;
-                *inFlight -= 1;
-                (*pump)();
-            });
-        };
-
-        (*pump)();
+        m_fanOutDevices = result.devices;
+        m_fanOutContexts.clear();
+        m_fanOutNextIndex = 0;
+        m_fanOutInFlight = 0;
+        m_fanOutCompleted = 0;
+        m_fanOutHadError = false;
+        pumpDeviceChannelFanOut(reloadGeneration);
     });
+}
+
+void DeviceCheckScreen::pumpDeviceChannelFanOut(int reloadGeneration)
+{
+    if (reloadGeneration != m_reloadGeneration) {
+        return;
+    }
+    constexpr int kMaxConcurrentChannelLoads = 4;
+    while (m_fanOutInFlight < kMaxConcurrentChannelLoads && m_fanOutNextIndex < m_fanOutDevices.size()) {
+        const DeviceSummary device = m_fanOutDevices.at(m_fanOutNextIndex);
+        ++m_fanOutNextIndex;
+        ++m_fanOutInFlight;
+        fetchDeviceChannelsWithRetry(device, 0, reloadGeneration);
+    }
+    if (m_fanOutCompleted >= m_fanOutDevices.size()) {
+        finishDeviceChannelFanOut(reloadGeneration);
+    }
+}
+
+void DeviceCheckScreen::fetchDeviceChannelsWithRetry(const DeviceSummary &device, int attempt, int reloadGeneration)
+{
+    constexpr int kChannelRetryDelayMs = 150;
+    m_deviceService->fetchDeviceChannels(device.deviceId, this, [this, device, attempt, reloadGeneration](const DeviceChannelsResult &channelResult) {
+        if (reloadGeneration != m_reloadGeneration) {
+            return;
+        }
+        if (!channelResult.ok && attempt < 1) {
+            QTimer::singleShot(kChannelRetryDelayMs, this, [this, device, attempt, reloadGeneration]() {
+                fetchDeviceChannelsWithRetry(device, attempt + 1, reloadGeneration);
+            });
+            return;
+        }
+
+        if (!channelResult.ok) {
+            m_fanOutHadError = true;
+        } else {
+            for (const auto &channel : channelResult.channels) {
+                SelectedChannelContext ctx;
+                ctx.deviceId = device.deviceId;
+                ctx.channelId = channel.channelId;
+                ctx.channelNo = channel.channelNo;
+                ctx.deviceIp = device.ip.trimmed();
+                const QString channelLabel = channel.name.trimmed().isEmpty()
+                    ? (channel.channelNo >= 0 ? QString("CH%1").arg(channel.channelNo) : QString("CH"))
+                    : channel.name.trimmed();
+                ctx.displayName = (device.channelCount > 1 || channelResult.channels.size() > 1)
+                    ? QString("%1 - %2").arg(device.name, channelLabel)
+                    : device.name;
+                ctx.deviceType = device.type.trimmed().isEmpty() ? "UNKNOWN" : device.type.trimmed().toUpper();
+                ctx.model = device.model;
+                ctx.online = device.online;
+                ctx.health = device.health.trimmed().isEmpty()
+                    ? (device.online ? "OK" : "DOWN")
+                    : device.health.trimmed();
+                m_fanOutContexts.push_back(ctx);
+            }
+        }
+
+        ++m_fanOutCompleted;
+        --m_fanOutInFlight;
+        pumpDeviceChannelFanOut(reloadGeneration);
+    });
+}
+
+void DeviceCheckScreen::finishDeviceChannelFanOut(int reloadGeneration)
+{
+    if (reloadGeneration != m_reloadGeneration) {
+        return;
+    }
+    applyDeviceTree(m_fanOutContexts);
+    if (m_fanOutContexts.isEmpty()) {
+        showDeviceStatusMessage("채널이 없습니다.", "info");
+    } else if (m_fanOutHadError) {
+        showDeviceStatusMessage(QString("일부 채널 조회 실패 (총 %1개 채널)").arg(m_fanOutContexts.size()), "error");
+    } else {
+        showDeviceStatusMessage(QString("채널 %1건").arg(m_fanOutContexts.size()), "success");
+    }
+    setUiBusy(false);
 }
 
 void DeviceCheckScreen::applyDeviceTree(const QVector<SelectedChannelContext> &contexts)

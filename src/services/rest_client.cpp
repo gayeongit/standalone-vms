@@ -126,9 +126,11 @@ void RestClient::requestJson(
     });
     timeoutTimer->start();
 
+    // context==nullptr은 "가드 없음, 항상 실행"을 의미한다 — DeviceService::dispatchAsync,
+    // OnvifLiteClient의 관례와 통일. context가 있었는데 이미 파괴된 경우만 콜백을 버린다.
     QPointer<QObject> guard = context;
-    QObject::connect(reply, &QNetworkReply::finished, this, [this, reply, requestTag, suppressUnauthorized, guard, callback = std::move(callback)]() mutable {
-        if (!guard) {
+    QObject::connect(reply, &QNetworkReply::finished, this, [this, reply, context, requestTag, suppressUnauthorized, guard, callback = std::move(callback)]() mutable {
+        if (context && !guard) {
             reply->deleteLater();
             return;
         }

@@ -31,6 +31,19 @@ QString extractSingleValue(const QString &xmlFragment, const QString &tagLocalNa
     return match.hasMatch() ? match.captured(1).trimmed() : QString();
 }
 
+// SOAP 본문에 문자열을 끼워 넣기 전 XML 특수문자를 escape한다 — 사용자명/토큰 등에
+// &, <, > 등이 섞이면 요청 XML 자체가 깨질 수 있다.
+QString xmlEscape(const QString &value)
+{
+    QString escaped = value;
+    escaped.replace(QLatin1Char('&'), QStringLiteral("&amp;"));
+    escaped.replace(QLatin1Char('<'), QStringLiteral("&lt;"));
+    escaped.replace(QLatin1Char('>'), QStringLiteral("&gt;"));
+    escaped.replace(QLatin1Char('"'), QStringLiteral("&quot;"));
+    escaped.replace(QLatin1Char('\''), QStringLiteral("&apos;"));
+    return escaped;
+}
+
 QByteArray wrapSoapRequest(const QString &bodyContent)
 {
     return QStringLiteral(
@@ -56,7 +69,9 @@ QByteArray buildWsSecurityHeader(const QString &username, const QString &passwor
         nonceBytes[i] = static_cast<char>(QRandomGenerator::global()->bounded(256));
     }
     const QString nonceBase64 = QString::fromLatin1(nonceBytes.toBase64());
-    const QString created = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs) + QStringLiteral("Z");
+    // QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)는 UTC 타임스탬프에 이미 "Z"를
+    // 붙여서 반환한다 — 여기서 또 붙이면 "...ZZ"가 되어 실제 카메라가 파싱 실패할 수 있다.
+    const QString created = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
 
     const QByteArray digestInput = nonceBytes + created.toUtf8() + password.toUtf8();
     const QByteArray digest = QCryptographicHash::hash(digestInput, QCryptographicHash::Sha1);
@@ -72,7 +87,7 @@ QByteArray buildWsSecurityHeader(const QString &username, const QString &passwor
                "<wsse:Nonce EncodingType=\"http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-soap-message-security-1.0#Base64Binary\">%3</wsse:Nonce>"
                "<wsu:Created>%4</wsu:Created>"
                "</wsse:UsernameToken></wsse:Security></e:Header>")
-        .arg(username, digestBase64, nonceBase64, created)
+        .arg(xmlEscape(username), digestBase64, nonceBase64, created)
         .toUtf8();
 }
 
@@ -127,7 +142,7 @@ QByteArray buildRelativeMoveRequest(const QString &profileToken, double zoomDelt
         "<tt:Zoom xmlns:tt=\"http://www.onvif.org/ver10/schema\" x=\"%2\"/>"
         "</tptz:Translation>"
         "</tptz:RelativeMove>")
-        .arg(profileToken, QString::number(zoomDelta, 'f', 4));
+        .arg(xmlEscape(profileToken), QString::number(zoomDelta, 'f', 4));
     return wrapSoapRequestWithSecurity(body, username, password);
 }
 
@@ -142,7 +157,7 @@ QByteArray buildImagingMoveRequest(const QString &videoSourceToken, double focus
         "</timg:Relative>"
         "</timg:Focus>"
         "</timg:Move>")
-        .arg(videoSourceToken, QString::number(focusDelta, 'f', 4));
+        .arg(xmlEscape(videoSourceToken), QString::number(focusDelta, 'f', 4));
     return wrapSoapRequestWithSecurity(body, username, password);
 }
 

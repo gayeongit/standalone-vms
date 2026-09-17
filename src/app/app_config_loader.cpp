@@ -1,6 +1,7 @@
 #include "app_config_loader.h"
 
 #include <QCoreApplication>
+#include <QDebug>
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -43,8 +44,9 @@ bool loadAppConfig(AppConfig *out, QString *errorMessage)
     }
 
     if (foundPath.isEmpty()) {
+        qWarning() << "app_config.json 파일을 찾지 못했습니다. 경로:" << candidates;
         if (errorMessage) {
-            *errorMessage = QString("app_config.json 파일을 찾지 못했습니다. 경로: %1").arg(candidates.join(", "));
+            *errorMessage = "app_config.json이 없어 로그인이 비활성화되었습니다. 게스트로 이용해 주세요.";
         }
         return false;
     }
@@ -52,23 +54,22 @@ bool loadAppConfig(AppConfig *out, QString *errorMessage)
     QJsonParseError parseError;
     const QJsonDocument doc = QJsonDocument::fromJson(raw, &parseError);
     if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
+        qWarning() << "app_config.json 파싱 실패:" << foundPath << parseError.errorString();
         if (errorMessage) {
-            *errorMessage = QString("app_config.json 파싱 실패(%1): %2").arg(foundPath, parseError.errorString());
+            *errorMessage = "app_config.json 파싱에 실패해 로그인이 비활성화되었습니다.";
         }
         return false;
     }
 
     const QJsonObject root = doc.object();
     const QString apiBaseUrl = root.value("apiBaseUrl").toString().trimmed();
-    if (apiBaseUrl.isEmpty()) {
-        if (errorMessage) {
-            *errorMessage = QString("app_config.json(apiBaseUrl)이 비어 있습니다: %1").arg(foundPath);
-        }
-        return false;
+    // apiBaseUrl이 없어도 아래 device/event/playback/ugv 설정은 계속 읽는다 — 서버 없이
+    // 로컬 카메라(ONVIF)만 쓰는 구성도 유효하다. 반환값은 "서버 설정이 유효한지"만 의미한다.
+    const bool serverConfigured = !apiBaseUrl.isEmpty();
+    if (serverConfigured) {
+        out->apiBaseUrl = apiBaseUrl;
+        out->requestTimeoutMs = (std::max)(1000, root.value("requestTimeoutMs").toInt(8000));
     }
-
-    out->apiBaseUrl = apiBaseUrl;
-    out->requestTimeoutMs = (std::max)(1000, root.value("requestTimeoutMs").toInt(8000));
 
     const QJsonObject authObj = root.value("auth").toObject();
     const QString loginPath = authObj.value("loginPath").toString().trimmed();
@@ -194,6 +195,14 @@ bool loadAppConfig(AppConfig *out, QString *errorMessage)
     if (minLon < maxLon) {
         out->ugvMapMinLon = minLon;
         out->ugvMapMaxLon = maxLon;
+    }
+
+    if (!serverConfigured) {
+        qWarning() << "app_config.json(apiBaseUrl)이 비어 있습니다:" << foundPath;
+        if (errorMessage) {
+            *errorMessage = "apiBaseUrl이 없어 로그인이 비활성화되었습니다. 게스트로 이용해 주세요.";
+        }
+        return false;
     }
 
     return true;

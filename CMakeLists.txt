@@ -94,12 +94,21 @@ if(VMS_WITH_GSTREAMER)
     target_link_libraries(VMS_v2 PRIVATE ${GSTREAMER_LIBRARIES})
 endif()
 
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/app_config.json")
-    add_custom_command(TARGET VMS_v2 POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_CURRENT_SOURCE_DIR}/app_config.json"
-            "$<TARGET_FILE_DIR:VMS_v2>/app_config.json")
-endif()
+# app_config.json은 선택 사항(서버 없이도 게스트 ONVIF 경로는 동작해야 함)이라, 파일 존재 여부를
+# configure 시점(if(EXISTS...))이 아니라 매 빌드 시점에 확인해야 한다 — configure 시점에만 확인하면
+# "빌드 후 파일을 지움" 같은 경우 다음 빌드가 복사 실패로 깨진다. cmd의 if exist로 빌드 시점에 확인.
+# 원본이 없어졌는데 출력 폴더에 예전 복사본이 남아있으면 그 오래된(예: 서버 주소가 든) 설정을
+# 계속 읽게 되므로, 원본이 없을 땐 출력 폴더의 복사본도 같이 지운다.
+#
+# POST_BUILD로 VMS_v2에 그냥 붙이면 소스 변경이 없어 relink가 안 일어나는 빌드에서는 ninja가
+# 이 커맨드 자체를 스킵해버린다(출력 파일이 이미 최신이라고 판단) — app_config.json을 지우기만
+# 하고 소스는 안 건드린 채 재빌드하면 정리가 안 되는 걸 실제로 재현해서 확인함. 그래서 출력
+# 추적이 없는 별도 ALL 타깃으로 분리해 매 빌드 호출마다 항상 실행되게 한다.
+add_custom_target(sync_app_config ALL
+    COMMAND cmd /c if exist "${CMAKE_CURRENT_SOURCE_DIR}/app_config.json" (${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/app_config.json" "$<TARGET_FILE_DIR:VMS_v2>/app_config.json") else (if exist "$<TARGET_FILE_DIR:VMS_v2>/app_config.json" ${CMAKE_COMMAND} -E remove "$<TARGET_FILE_DIR:VMS_v2>/app_config.json")
+    COMMENT "app_config.json 동기화 확인"
+)
+add_dependencies(VMS_v2 sync_app_config)
 
 # qt6keychain은 shared 라이브러리로 빌드되므로, 실행 시 PATH 없이도 찾을 수 있게 exe 옆에 복사.
 add_custom_command(TARGET VMS_v2 POST_BUILD

@@ -9,7 +9,8 @@
 namespace CredentialStore {
 
 bool load(const QString &deviceIp, QString *username, QString *password);
-void save(const QString &deviceIp, const QString &username, const QString &password);
+// 반환값은 두 키(username/password) 모두 쓰기 성공했는지를 의미한다 — 하나만 실패해도 false.
+bool save(const QString &deviceIp, const QString &username, const QString &password);
 
 } // namespace CredentialStore
 

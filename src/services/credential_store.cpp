@@ -28,7 +28,7 @@ bool readOne(const QString &key, QString *out)
     return true;
 }
 
-void writeOne(const QString &key, const QString &value)
+bool writeOne(const QString &key, const QString &value)
 {
     QKeychain::WritePasswordJob job(kService);
     job.setKey(key);
@@ -37,6 +37,7 @@ void writeOne(const QString &key, const QString &value)
     QObject::connect(&job, &QKeychain::Job::finished, &loop, &QEventLoop::quit);
     job.start();
     loop.exec();
+    return job.error() == QKeychain::NoError;
 }
 
 } // namespace
@@ -62,14 +63,15 @@ bool load(const QString &deviceIp, QString *username, QString *password)
     return true;
 }
 
-void save(const QString &deviceIp, const QString &username, const QString &password)
+bool save(const QString &deviceIp, const QString &username, const QString &password)
 {
     const QString trimmedIp = deviceIp.trimmed();
     if (trimmedIp.isEmpty()) {
-        return;
+        return false;
     }
-    writeOne(keyFor(trimmedIp, QStringLiteral("username")), username);
-    writeOne(keyFor(trimmedIp, QStringLiteral("password")), password);
+    const bool usernameOk = writeOne(keyFor(trimmedIp, QStringLiteral("username")), username);
+    const bool passwordOk = writeOne(keyFor(trimmedIp, QStringLiteral("password")), password);
+    return usernameOk && passwordOk;
 }
 
 } // namespace CredentialStore

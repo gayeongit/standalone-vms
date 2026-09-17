@@ -375,6 +375,8 @@ void MainWindow::initializeState()
     state.selectedChannelContexts.clear();
     state.channelRtspByName.clear();
     state.channelRtspById.clear();
+    state.channelVideoCodecByName.clear();
+    state.channelVideoCodecById.clear();
     state.channelOnvifPtzXAddrById.clear();
     state.channelOnvifImagingXAddrById.clear();
     state.channelOnvifProfileTokenById.clear();
