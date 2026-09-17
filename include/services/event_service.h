@@ -26,6 +26,10 @@ public:
     void setEventDetailPathTemplate(const QString &pathTemplate);
 
     void ingestWsMessage(const QJsonObject &message);
+    // Phase 4: LocalEventListener가 받은 카메라 UDP broadcast 이벤트 하나를 그대로 넘긴다.
+    // 기존 ingestEventObject를 재사용하므로 WS/REST와 같은 dedup 캐시를 공유한다 —
+    // 같은 이벤트가 서버(WS)와 로컬(UDP) 양쪽에서 들어와도 중복 없이 하나만 남는다.
+    void ingestLocalEvent(const QJsonObject &event);
     void fetchRecentEvents(QObject *context, std::function<void(bool)> callback = {});
     void fetchEventDetail(const QString &eventId, QObject *context, std::function<void(bool, const EventInfo &)> callback = {});
 

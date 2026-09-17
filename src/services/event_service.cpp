@@ -147,6 +147,14 @@ void EventService::ingestWsMessage(const QJsonObject &message)
                       << "keys=" << message.keys();
 }
 
+void EventService::ingestLocalEvent(const QJsonObject &event)
+{
+    if (event.isEmpty()) {
+        return;
+    }
+    ingestEventObject(event);
+}
+
 void EventService::fetchRecentEvents(QObject *context, std::function<void(bool)> callback)
 {
     if (!m_restClient || !m_restClient->isConfigured()) {

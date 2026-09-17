@@ -14,6 +14,7 @@
 #include "onvif_lite_client.h"
 #include "event_service.h"
 #include "event_ui_helpers.h"
+#include "local_event_listener.h"
 #include "login_screen.h"
 #include "main_screen.h"
 #include "cctv_screen.h"
@@ -567,6 +568,27 @@ bool MainWindow::initializeAuthServices()
 
     m_cctvControlService = new CctvControlService(m_onvifLiteClient, this);
 
+    // EventService/LocalEventListener도 서버 설정과 무관하게 항상 만든다 — Phase 4부터는 카메라
+    // (목업 호스트)가 쏘는 UDP broadcast 이벤트를 서버 없이 직접 받는 경로가 생겼다. 예전엔
+    // EventService가 이 아래(서버 게이트 뒤)에서만 생성돼서, 서버 설정이 없는 지금 이 프로젝트의
+    // 기본 상태에서는 로컬 이벤트를 받아도 갈 곳이 없었다 — 4.1과 같은 종류의 문제라 같이 옮김.
+    m_eventService = new EventService(m_restClient, this);
+    m_eventService->setEventsPath(config.eventEventsPath);
+    m_eventService->setEventDetailPathTemplate(config.eventDetailPathTemplate);
+    EventUiHelpers::setEventService(m_eventService);
+
+    m_localEventListener = new LocalEventListener(this);
+    m_localEventListener->setPort(static_cast<quint16>(config.eventLocalUdpPort));
+    connect(m_localEventListener, &LocalEventListener::eventReceived, this, [this](const QJsonObject &event) {
+        if (m_eventService) {
+            m_eventService->ingestLocalEvent(event);
+        }
+    });
+    connect(m_localEventListener, &LocalEventListener::errorOccurred, this, [](const QString &message) {
+        qWarning().noquote() << "[LocalEventListener]" << message;
+    });
+    m_localEventListener->start();
+
     if (!serverConfigReady) {
         return false;
     }
@@ -594,10 +616,6 @@ bool MainWindow::initializeAuthServices()
     m_ugvMapMinLon = config.ugvMapMinLon;
     m_ugvMapMaxLon = config.ugvMapMaxLon;
 
-    m_eventService = new EventService(m_restClient, this);
-    m_eventService->setEventsPath(config.eventEventsPath);
-    m_eventService->setEventDetailPathTemplate(config.eventDetailPathTemplate);
-    EventUiHelpers::setEventService(m_eventService);
     m_wsClient = new WsClient(this);
     m_wsClient->setUrl(config.eventWsUrl);
     m_wsClient->setSubprotocol(config.eventWsSubprotocol);

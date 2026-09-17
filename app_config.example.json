@@ -10,7 +10,8 @@
     "wsUrl": "",
     "wsSubprotocol": "vms.events.v1",
     "eventsPath": "/events",
-    "detailPath": "/event/{eventId}"
+    "detailPath": "/event/{eventId}",
+    "localUdpPort": 9998
   },
   "device": {
     "devicesPath": "/devices",

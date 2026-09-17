@@ -111,6 +111,10 @@ bool loadAppConfig(AppConfig *out, QString *errorMessage)
     if (!eventDetailPath.isEmpty()) {
         out->eventDetailPathTemplate = eventDetailPath;
     }
+    const int localUdpPort = eventObj.value("localUdpPort").toInt(0);
+    if (localUdpPort > 0) {
+        out->eventLocalUdpPort = localUdpPort;
+    }
 
     const QJsonObject deviceObj = root.value("device").toObject();
     const QString devicesPath = deviceObj.value("devicesPath").toString().trimmed();

@@ -13,6 +13,7 @@ struct AppConfig {
     QString eventWsSubprotocol = "vms.events.v1";
     QString eventEventsPath = "/events";
     QString eventDetailPathTemplate = "/event/{eventId}";
+    int eventLocalUdpPort = 9998; // Phase 4: mock_camera_host/event_broadcaster.cpp와 동일 포트
     QString devicesPath = "/devices";
     QString deviceChannelsPathTemplate = "/device/{deviceId}/channels";
     QString channelDetailPathTemplate = "/channel/{channelId}";

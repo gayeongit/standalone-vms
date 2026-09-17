@@ -406,7 +406,64 @@ Phase 3b 안정화 패치 완료.
 
 ---
 
+## Phase 4. 이벤트 직접 수신 경로
+
+### 진입 전 조사 (2026-09-17)
+
+착수 전에 사용자가 던진 질문 둘을 코드로 확인했다: (1) "팀 프로젝트 때 CCTV가 브로드캐스트로 이벤트를 날렸다"는 기억이 맞는지, (2) 그때 이벤트가 지저분해서 파싱했던 기억이 있는데 이번에도 목업을 일부러 지저분하게 만들어야 하는지.
+
+**(1) 맞다 — 증거가 이미 이 repo에 있다.** `EventService::buildEventInfo()`/`extractEventArray()`/`isLikelyEventObject()`(`src/services/event_service.cpp`)가 이미 극도로 방어적으로 짜여 있다 — eventId는 `eventId`/`id`/`msgId` 중 있는 걸, timestamp는 `timestamp`/`eventTime`/`time`/`createdAt` 중 있는 걸, channel은 `channel`/`channelName`/`source` 중 있는 걸, type은 `eventType`/`type`/`name` 중 있는 걸 쓰고, 메시지 wrapping도 `payload.data`/`payload.events`/`payload.items`/`payload.event`(단일)/`data`/`events`/`items`/`event`(단일) 등 거의 모든 형태를 다 시도한다. 이 코드 자체가 팀 프로젝트 때 실제로 겪은 지저분함의 증거다.
+
+**(2) 목업은 안 더럽혀도 된다 — 이미 있는 방어 로직을 재사용하면 됨.** 다만 그 지저분함은 "CCTV → 서버" 구간에서 발생했고 서버가 어느 정도 정리해서 WS로 relay하는 구조였다(그런데도 이 정도로 방어적인 걸 보면 서버도 완벽히 정리하진 않았던 것으로 보임). Phase 4는 서버를 안 거치고 VMS가 카메라 브로드캐스트를 직접 받는 경로라, "어느 레이어의 지저분함을 재현하는지"가 애매해진다. CLAUDE.md 설계 원칙 4(목업은 정교/재현 불필요)에 따라 Phase 0가 이미 만들어둔 깨끗한 JSON 브로드캐스트(`event_broadcaster.cpp`)는 그대로 두고, `EventService`에 이미 구현된 방어적 정규화 로직을 **재사용**하는 쪽으로 결정 — "지저분한 실데이터에도 안전하다"는 능력은 안 잃으면서 목업을 일부러 흉하게 만드는 수고는 안 한다.
+
+**부가 발견 — `EventService`도 서버 설정에 종속되어 있다.** `MainWindow::initializeAuthServices()`에서 `m_eventService`/`EventUiHelpers::setEventService(...)`가 `serverConfigReady` 체크(Phase 3b 안정화 패치에서 만든 분기) **뒤쪽**에서 생성되고 있다. 즉 지금 구조로 로컬 이벤트를 얹으면, 서버 설정이 없는(=지금 이 프로젝트의 기본 상태인) 게스트 환경에서 `EventService` 자체가 안 만들어져서 로컬 이벤트도 갈 곳이 없다 — 4.1과 같은 종류의 문제. `EventService` 생성을 카메라 도메인 서비스들과 같은 "항상 생성" 구간으로 옮겨야 한다(WS 전용 부분인 `m_wsClient`와 그 `connect()`들은 서버 게이트 안에 그대로 둠).
+
+### 대상
+
+- 신규: `include/services/local_event_listener.h`, `src/services/local_event_listener.cpp` — `QUdpSocket` 기반, `WsClient`와 같은 패턴(설정 가능한 포트, `start()`/`stop()`, `eventReceived(QJsonObject)`/`errorOccurred(QString)` 시그널)
+- `include/services/event_service.h`/`.cpp` — `ingestLocalEvent(const QJsonObject &event)` public 메서드 추가(기존 private `ingestEventObject(...)`를 그대로 재사용하는 얇은 래퍼) — WS/REST와 같은 `m_seenKeys` 캐시를 타서 소스 간 중복 제거가 설계상 자동으로 됨
+- `include/app/app_config_loader.h`/`.cpp` — `AppConfig::eventLocalUdpPort`(기본 9998, mock의 `event_broadcaster.cpp` 포트와 동일) 추가
+- `include/app/mainwindow.h` — `LocalEventListener *m_localEventListener` 멤버 추가
+- `src/app/mainwindow_auth.cpp`의 `initializeAuthServices()` — `EventService` 생성을 "항상 생성" 구간으로 이동, `LocalEventListener` 생성/시작도 그 구간에 추가(서버 설정·로그인 여부와 무관하게 항상 동작 — 설계 원칙 3)
+- `app_config.example.json` — `event.localUdpPort` 필드 추가
+
+### 작업
+
+1. `AppConfig`에 `eventLocalUdpPort` 추가, `app_config_loader.cpp`에서 파싱(옵션, 없으면 9998)
+2. `LocalEventListener` 작성 — bind 실패(포트 충돌/방화벽)는 `errorOccurred`로 구분해서 알리고, 수신한 데이터그램의 JSON 파싱 실패는 (지저분한 실카메라 대비) 조용히 무시 + `qWarning()` 로그만 남김(리뷰 5.2절 "잘못된 JSON은 안전하게 무시")
+3. `EventService::ingestLocalEvent(...)` 추가 — 기존 `ingestEventObject(...)` 재사용
+4. `initializeAuthServices()` 재구성 — `EventService`/`EventUiHelpers::setEventService(...)`를 카메라 도메인 서비스들과 같은 "항상 생성" 구간으로 이동, `LocalEventListener` 생성 후 `eventReceived` → `m_eventService->ingestLocalEvent(...)` 연결(isAuthenticated 가드 없음 — WS 쪽의 기존 가드는 그대로 유지). `m_wsClient`와 그 하위 로직은 서버 게이트 안에 그대로.
+5. 화면(`EventViewWidget`/`TopbarWidget`/`EventUiHelpers`)은 무수정 — 이미 `EventService`의 시그널만 구독하므로 자동으로 로컬 이벤트도 받게 됨
+6. 빌드 확인 + 사용자 게이트 테스트
+
+### 완료 기준 / 게이트 테스트
+
+- [x] 빌드 성공 (`VMS_v2`, exit code 0)
+- [x] 게스트 모드에서 `event_broadcaster.exe`가 쏘는 더미 이벤트가 실시간으로 알림/이벤트뷰에 표시되는지 — 사용자 확인 완료 (2026-09-17), 이벤트 상세 다이얼로그도 정상 확인
+- [x] 서버 설정이 없어도(=지금 이 환경의 기본 상태) 이벤트 UI 자체가 정상 동작하는지 — 사용자 확인 완료. 앱 시작 시점부터 `LocalEventListener`가 이미 수신 중이라, Main 진입 전(로그인~장치확인~채널선택 하는 동안)에 받은 이벤트가 진입 직후 이미 몇 개 쌓여있는 것도 확인됨(의도된 동작)
+- [x] 로그아웃 후 이벤트 히스토리가 초기화되는지 — 사용자 확인 완료(`EventService::reset()`이 WS/로컬 공유 캐시를 통째로 비움)
+- [x] 잘못된 형식의 UDP 패킷을 보내도 크래시 없이 무시되는지 — 사용자 확인 완료(PowerShell `UdpClient`로 비-JSON 패킷 전송, 아무 변화 없이 조용히 무시됨 = 정상)
+- [ ] (로그인 상태의 서버+로컬 이벤트 병행은 이 환경에서 서버가 없어 테스트 불가 — Phase 3b와 동일한 사유로 스킵)
+
+### 게이트 테스트 중 나온 질문 (2026-09-17)
+
+사용자가 "저번 팀 프로젝트 때도 이벤트가 몇 초 간격으로 왔었는데 지금도 그런 게 남아있는 거냐"고 질문. **처음엔 "VMS 쪽에는 배치/딜레이 로직이 전혀 없다"고 잘못 답했다** — `LocalEventListener`/`EventService`(내가 새로 만든 서비스 계층)만 확인하고 `MainScreen`(화면 계층, 원래부터 있던 코드)을 안 봐서 놓쳤음. 다시 확인해보니 `MainScreen`에 이미 디바운스 로직이 있었다(`main_screen.cpp:635-1125`):
+
+- `EventService::eventsUpdated` 신호가 오면 바로 안 그리고 `scheduleEventViewRefresh()`를 거침
+- `m_eventViewRefreshTimer`(싱글샷, 5000ms) — 새 이벤트가 올 때마다 다시 시작(연달아 오면 계속 미뤄짐)
+- `m_eventViewPendingBurstCount >= 5`면 타이머 무시하고 즉시 반영 — burst 상황에서 무한정 안 미뤄지는 안전장치
+
+즉 "몇 초 간격 아니면 몇 개 쌓이면 업데이트"라는 사용자 기억이 정확했고, 이 로직은 화면 계층에 원래부터 있어서(설계 원칙상 안 건드림) 지금도 그대로 살아있다. **정리**:
+- 서비스 계층(`LocalEventListener`/`EventService`, 신규): 배치 없음, 도착 즉시 처리
+- 화면 계층(`MainScreen`, 기존): 5초 디바운스 + burst 안전장치로 렌더링
+
+리뷰 문서 5.2절이 요구했던 "UDP burst 상황에서도 매번 전체 재렌더링하지 않는다"는 **이미 이 기존 코드가 처리하고 있어서 새로 만들 필요 없음** — 이전에 "지금 단계에서 디바운스 추가 안 함"으로 기록했던 건 착오였고, 사실은 이미 있었다.
+
+Phase 4 완료.
+
+---
+
 ## 다음 Phase 메모
 
-- Phase 3b 안정화 패치 완료 (2026-09-17). 다음은 Phase 4(이벤트 직접 수신 경로).
-- 이후 Phase 4 → 5(선택) → 6 순으로 진행. Phase 5/6 착수 시 `docs/code_review_stabilization_plan.md`의 해당 섹션(다운로드 보안 경계, AppState 분해 등) 재확인.
+- Phase 4 착수. 위 작업 순서대로 구현 진행.
+- 이후 Phase 5(선택) → 6 순으로 진행. Phase 5/6 착수 시 `docs/code_review_stabilization_plan.md`의 해당 섹션(다운로드 보안 경계, AppState 분해 등) 재확인.

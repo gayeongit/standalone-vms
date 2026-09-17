@@ -23,6 +23,7 @@ class PlaybackService;
 class UgvService;
 class WsClient;
 class EventService;
+class LocalEventListener;
 class SettingsDialog;
 class QTimer;
 
@@ -73,6 +74,7 @@ private:
     UgvService *m_ugvService = nullptr;
     WsClient *m_wsClient = nullptr;
     EventService *m_eventService = nullptr;
+    LocalEventListener *m_localEventListener = nullptr;
     QTimer *m_eventPingTimer = nullptr;
     QString m_eventSubscriptionId;
     bool m_authInfraReady = false;
