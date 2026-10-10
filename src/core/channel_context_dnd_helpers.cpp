@@ -5,7 +5,6 @@
 #include <QDataStream>
 #include <QMap>
 #include <QMimeData>
-#include <QSettings>
 #include <QVariant>
 
 bool isUgvChannelName(const QString &channelName)
@@ -272,30 +271,6 @@ QString rtspUrlForDisplayName(const QString &displayName, const QString &deviceT
         return byName;
     }
 
-    const QString normalizedType = deviceType.trimmed().toUpper();
-    QSettings settings("TeamClue", "VMS_v1");
-    const int size = settings.beginReadArray("devices");
-    for (int i = 0; i < size; ++i) {
-        settings.setArrayIndex(i);
-        const QString name = settings.value("name").toString().trimmed();
-        if (name != trimmedName) {
-            continue;
-        }
-        QString rowType = settings.value("type").toString().trimmed().toUpper();
-        if (rowType.isEmpty()) {
-            rowType = QStringLiteral("CCTV");
-        }
-        if (!normalizedType.isEmpty() && rowType != normalizedType) {
-            continue;
-        }
-        const QString url = settings.value("url").toString().trimmed();
-        if (!url.isEmpty()) {
-            settings.endArray();
-            return url;
-        }
-    }
-    settings.endArray();
-
     return {};
 }
 
@@ -317,32 +292,6 @@ QString videoCodecForDisplayName(const QString &displayName, const QString &devi
         }
     }
     return AppState::instance().channelVideoCodecByName.value(displayName.trimmed()).trimmed();
-}
-
-QString rtspUrlForChannel(const QString &channelName)
-{
-    const QString runtimeRtsp = rtspUrlForDisplayName(channelName);
-    if (!runtimeRtsp.isEmpty()) {
-        return runtimeRtsp;
-    }
-
-    QSettings settings("TeamClue", "VMS_v1");
-    const int size = settings.beginReadArray("devices");
-    for (int i = 0; i < size; ++i) {
-        settings.setArrayIndex(i);
-        const QString name = settings.value("name").toString().trimmed();
-        if (name != channelName) {
-            continue;
-        }
-        const QString url = settings.value("url").toString().trimmed();
-        if (!url.isEmpty()) {
-            settings.endArray();
-            return url;
-        }
-    }
-    settings.endArray();
-
-    return {};
 }
 
 QString extractDroppedChannel(const QMimeData *mimeData)

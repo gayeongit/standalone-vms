@@ -38,7 +38,6 @@ QString rtspUrlForChannelId(int channelId);
 QString rtspUrlForDisplayName(const QString &displayName, const QString &deviceType = QString());
 QString videoCodecForChannelId(int channelId);
 QString videoCodecForDisplayName(const QString &displayName, const QString &deviceType = QString());
-QString rtspUrlForChannel(const QString &channelName);
 QString extractDroppedChannel(const QMimeData *mimeData);
 DroppedChannelInfo extractDroppedChannelInfo(const QMimeData *mimeData);
 

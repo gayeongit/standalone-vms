@@ -9,11 +9,6 @@ class SettingsDialog : public QDialog
 
 public:
     explicit SettingsDialog(QWidget *parent = nullptr);
-
-    bool devicesChanged() const;
-
-private:
-    bool m_devicesChanged = false;
 };
 
 #endif // SETTINGS_DIALOG_H

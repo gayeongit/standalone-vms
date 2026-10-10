@@ -7,22 +7,16 @@
 #include <QAbstractItemView>
 #include <QDate>
 #include <QDateTime>
-#include <QDir>
-#include <QFileInfo>
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QLabel>
-#include <QMouseEvent>
-#include <QPainter>
 #include <QPixmap>
 #include <QPushButton>
 #include <QResizeEvent>
 #include <QScrollArea>
-#include <QSettings>
 #include <QSet>
 #include <QSizePolicy>
 #include <QStackedWidget>
-#include <QStandardPaths>
 #include <QToolButton>
 #include <QTreeWidget>
 #include <QVBoxLayout>
@@ -32,71 +26,6 @@
 #include <memory>
 
 namespace {
-class EventCardWidget : public QFrame
-{
-public:
-    explicit EventCardWidget(QWidget *parent = nullptr)
-        : QFrame(parent)
-    {
-        setObjectName("eventCardWidget");
-        setCursor(Qt::PointingHandCursor);
-    }
-
-    void setClickHandler(std::function<void()> handler)
-    {
-        m_clickHandler = std::move(handler);
-    }
-
-protected:
-    void mousePressEvent(QMouseEvent *event) override
-    {
-        if (event && event->button() == Qt::LeftButton && m_clickHandler) {
-            m_clickHandler();
-        }
-        QFrame::mousePressEvent(event);
-    }
-
-private:
-    std::function<void()> m_clickHandler;
-};
-
-class ElidedLabel : public QLabel
-{
-public:
-    explicit ElidedLabel(QWidget *parent = nullptr)
-        : QLabel(parent)
-    {
-        setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-        setMinimumWidth(0);
-    }
-
-    void setFullText(const QString &text)
-    {
-        m_fullText = text;
-        setToolTip(m_fullText);
-        updateElidedText();
-    }
-
-protected:
-    void resizeEvent(QResizeEvent *event) override
-    {
-        QLabel::resizeEvent(event);
-        updateElidedText();
-    }
-
-private:
-    void updateElidedText()
-    {
-        if (m_fullText.isEmpty()) {
-            QLabel::clear();
-            return;
-        }
-        QLabel::setText(fontMetrics().elidedText(m_fullText, Qt::ElideRight, std::max(0, contentsRect().width())));
-    }
-
-    QString m_fullText;
-};
-
 class ElidedButton : public QPushButton
 {
 public:
@@ -133,23 +62,6 @@ private:
 
     QString m_fullText;
 };
-
-QString sanitizeCardToken(const QString &src)
-{
-    QString out;
-    out.reserve(src.size());
-    for (const QChar ch : src) {
-        if (ch.isLetterOrNumber()) {
-            out.append(ch.toLower());
-        } else {
-            out.append('_');
-        }
-    }
-    while (out.contains("__")) {
-        out.replace("__", "_");
-    }
-    return out.trimmed();
-}
 
 bool parseEventTimestamp(const QString &value, QDateTime *out)
 {
@@ -256,105 +168,6 @@ QString modelLabelWithIpSuffix(const QString &modelName, const QString &deviceIp
     }
     Q_UNUSED(deviceId);
     return trimmedModel;
-}
-
-struct ManagedDeviceTreeEntry
-{
-    QString name;
-    QString type;
-};
-
-QVector<ManagedDeviceTreeEntry> loadManagedDeviceTreeEntries()
-{
-    QVector<ManagedDeviceTreeEntry> result;
-    QSet<QString> seen;
-
-    QSettings settings("TeamClue", "VMS_v1");
-    const int size = settings.beginReadArray("devices");
-    for (int i = 0; i < size; ++i) {
-        settings.setArrayIndex(i);
-        const QString name = settings.value("name").toString().trimmed();
-        QString type = settings.value("type").toString().trimmed();
-        if (name.isEmpty()) {
-            continue;
-        }
-        if (type.isEmpty()) {
-            type = QStringLiteral("CCTV");
-        }
-
-        const QString normalizedType = type.trimmed().toUpper();
-        const QString key = QStringLiteral("%1|%2").arg(normalizedType, name);
-        if (seen.contains(key)) {
-            continue;
-        }
-        seen.insert(key);
-        result.push_back({name, normalizedType});
-    }
-    settings.endArray();
-    return result;
-}
-
-QString eventCardPreviewPath(const EventInfo &eventInfo)
-{
-    const QString desktop = QStandardPaths::writableLocation(QStandardPaths::DesktopLocation);
-    if (desktop.isEmpty()) {
-        return {};
-    }
-
-    const QString channel = sanitizeCardToken(eventInfo.channel);
-    const QString type = sanitizeCardToken(eventInfo.type);
-    const QStringList names = {
-        "event_preview.jpg",
-        "event_preview.png",
-        QString("event_%1.jpg").arg(channel),
-        QString("event_%1.png").arg(channel),
-        QString("event_%1_%2.jpg").arg(channel, type),
-        QString("event_%1_%2.png").arg(channel, type),
-        "event.jpg",
-        "event.png"
-    };
-
-    for (const QString &name : names) {
-        const QString path = QDir(desktop).filePath(name);
-        if (QFileInfo::exists(path)) {
-            return path;
-        }
-    }
-    return {};
-}
-
-QPixmap buildEventCardPreview(const EventInfo &eventInfo)
-{
-    const QSize targetSize(640, 360);
-    const QString imagePath = eventCardPreviewPath(eventInfo);
-    if (!imagePath.isEmpty()) {
-        static QHash<QString, QPixmap> s_previewCache;
-        const auto cached = s_previewCache.constFind(imagePath);
-        if (cached != s_previewCache.constEnd() && !cached.value().isNull()) {
-            return cached.value();
-        }
-
-        const QPixmap pix(imagePath);
-        if (!pix.isNull()) {
-            s_previewCache.insert(imagePath, pix);
-            return pix;
-        }
-    }
-
-    return {};
-
-    QPixmap placeholder(targetSize);
-    placeholder.fill(QColor("#1C1C1E"));
-
-    QPainter painter(&placeholder);
-    painter.setRenderHint(QPainter::Antialiasing, true);
-    painter.setPen(QColor("#8A8A9A"));
-    QFont font = painter.font();
-    font.setPixelSize(18);
-    font.setWeight(QFont::Medium);
-    painter.setFont(font);
-    painter.drawText(placeholder.rect(), Qt::AlignCenter, QStringLiteral("[?ъ쭊 16:9]"));
-    return placeholder;
 }
 
 QPixmap centerCropPixmap(const QPixmap &pixmap, const QSize &targetSize)
@@ -495,7 +308,8 @@ void addPlaybackChannelsToDateRoot(QTreeWidgetItem *dateRoot, const PlaybackChan
     const auto staleChildren = dateRoot->takeChildren();
     qDeleteAll(staleChildren);
     if (!result.ok) {
-        new QTreeWidgetItem(dateRoot, QStringList() << QStringLiteral("議고쉶 ?ㅽ뙣"));
+        auto *errorItem = new QTreeWidgetItem(dateRoot, QStringList() << QStringLiteral("조회 실패"));
+        errorItem->setFlags(errorItem->flags() & ~(Qt::ItemIsSelectable | Qt::ItemIsDragEnabled));
         return;
     }
     QVector<PlaybackChannelSummary> filteredChannels;
@@ -506,7 +320,8 @@ void addPlaybackChannelsToDateRoot(QTreeWidgetItem *dateRoot, const PlaybackChan
         }
     }
     if (filteredChannels.isEmpty()) {
-        new QTreeWidgetItem(dateRoot, QStringList() << QStringLiteral("\uB179\uD654 \uC5C6\uC74C"));
+        auto *emptyItem = new QTreeWidgetItem(dateRoot, QStringList() << QStringLiteral("\uB179\uD654 \uC5C6\uC74C"));
+        emptyItem->setFlags(emptyItem->flags() & ~(Qt::ItemIsSelectable | Qt::ItemIsDragEnabled));
         return;
     }
 
@@ -580,7 +395,8 @@ void addPlaybackChannelsToDateRoot(QTreeWidgetItem *dateRoot, const PlaybackChan
         ugvRoot = nullptr;
     }
     if (!cctvRoot && !ugvRoot) {
-        new QTreeWidgetItem(dateRoot, QStringList() << QStringLiteral("\uB179\uD654 \uC5C6\uC74C"));
+        auto *emptyItem = new QTreeWidgetItem(dateRoot, QStringList() << QStringLiteral("\uB179\uD654 \uC5C6\uC74C"));
+        emptyItem->setFlags(emptyItem->flags() & ~(Qt::ItemIsSelectable | Qt::ItemIsDragEnabled));
     }
 }
 
@@ -754,8 +570,8 @@ EventViewWidget::EventViewWidget(QWidget *parent)
 
 void EventViewWidget::setEvents(const QVector<EventInfo> &events, int maxItems, bool showDispatchButton)
 {
-    // 硫붿씤 ?대깽?몃럭??理쒓렐 ?대깽?몃? 鍮좊Ⅴ寃??묒뼱蹂대뒗 UI??
-    // 紐⑤뱺 ??ぉ???띿뒪?명삎?쇰줈 ?듭씪???뺣낫 諛?꾨? ?믪씤??
+    // 메인 이벤트뷰는 최근 이벤트를 빠르게 짚어보는 UI다.
+    // 모든 항목을 텍스트 형태로 통일해서 정보 밀도와 확인을 높인다.
     if (!m_contentLayout) {
         return;
     }
@@ -935,11 +751,11 @@ SidebarWidget::SidebarWidget(const SidebarWidget::Config &config, QWidget *paren
 
 void SidebarWidget::populateChannelTree()
 {
-    // ?ъ씠?쒕컮 梨꾨꼸 ?몃━??AppState.selectedChannelContexts瑜??붾㈃??tree model濡??ш뎄?깊븳??
-    // ?좏깮??梨꾨꼸 紐⑸줉??紐⑤뜽 猷⑦듃? 梨꾨꼸 leaf濡??섎늻??CCTV/UGV ?몃━??媛곴컖 梨꾩슫??
-    // ?ш린??以묒슂???먯?:
-    // - CCTV/UGV瑜??쒕줈 ?ㅻⅨ tree濡?遺꾨━?섍퀬
-    // - model/device/channel 怨꾩링???ㅼ떆 留뚮뱾硫?    // - UGV???좏깮/?쒕옒洹?遺덇? ?뺤콉??諛붾줈 諛섏쁺?쒕떎??寃껋씠??
+    // 사이드바 채널 트리는 AppState.selectedChannelContexts를 화면용 tree model로 재구성한다.
+    // 선택된 채널 목록을 모델 루트와 채널 leaf로 나누어 CCTV/UGV 트리에 각각 채운다.
+    // 여기서 중요한 것:
+    // - CCTV/UGV를 서로 다른 tree로 분리하고, model/device/channel 계층을 다시 만들며
+    // - UGV의 선택/드래그 불가 정책이 바로 반영된다는 것이다.
     if (!m_channelTree) {
         return;
     }
@@ -999,52 +815,6 @@ void SidebarWidget::populateChannelTree()
         item->setData(0, Qt::UserRole + 3, type);
     }
 
-    const auto managedDevices = loadManagedDeviceTreeEntries();
-    for (const auto &device : managedDevices) {
-        const QString type = device.type.trimmed().toUpper();
-        if (type != QStringLiteral("CCTV") && type != QStringLiteral("UGV")) {
-            continue;
-        }
-        const QString displayName = device.name.trimmed();
-        if (displayName.isEmpty()) {
-            continue;
-        }
-
-        const QString leafKey = QStringLiteral("%1|%2").arg(type, displayName);
-        if (existingLeafKeys.contains(leafKey)) {
-            continue;
-        }
-        existingLeafKeys.insert(leafKey);
-
-        QTreeWidget *targetTree = (type == QStringLiteral("UGV") && m_ugvTree) ? m_ugvTree : m_channelTree;
-        const QString modelKey = QStringLiteral("%1::custom").arg(type);
-        auto *modelItem = modelRoots.value(modelKey, nullptr);
-        if (!modelItem) {
-            modelItem = new QTreeWidgetItem(targetTree, QStringList() << QStringLiteral("사용자 커스텀 장치"));
-            modelItem->setFlags(modelItem->flags() & ~(Qt::ItemIsSelectable | Qt::ItemIsDragEnabled));
-            const QFont modelFont = sidebarModelFont(modelItem->font(0));
-            modelItem->setFont(0, modelFont);
-            modelItem->setForeground(0, QBrush(QColor("#E5E5EA")));
-            modelRoots.insert(modelKey, modelItem);
-        }
-
-        auto *item = new QTreeWidgetItem(modelItem, QStringList() << displayName);
-        Qt::ItemFlags itemFlags = item->flags() | Qt::ItemIsEnabled;
-        if (type == QStringLiteral("CCTV")) {
-            itemFlags |= Qt::ItemIsSelectable | Qt::ItemIsDragEnabled;
-        } else {
-            itemFlags |= Qt::ItemIsSelectable;
-            itemFlags &= ~Qt::ItemIsDragEnabled;
-        }
-        item->setFlags(itemFlags);
-        const QFont channelFont = sidebarChannelFont(item->font(0));
-        item->setFont(0, channelFont);
-        item->setData(0, Qt::UserRole, -1);
-        item->setData(0, Qt::UserRole + 1, -1);
-        item->setData(0, Qt::UserRole + 2, displayName);
-        item->setData(0, Qt::UserRole + 3, type);
-    }
-
     auto sortChannelTree = [](QTreeWidget *tree) {
         if (!tree) {
             return;
@@ -1083,10 +853,9 @@ void SidebarWidget::setPlaybackService(PlaybackService *service)
 
 void SidebarWidget::reloadPlaybackTree()
 {
-    // Playback tree???뺤쟻 紐⑸줉???꾨땲??"?좎쭨蹂??쒕쾭 議고쉶 寃곌낵"瑜?梨꾩썙 ?ｋ뒗 lazy tree??
-    // ?좎쭨 root瑜?留뚮뱺 ?ㅼ쓬 媛??좎쭨蹂??ъ깮 媛??梨꾨꼸??鍮꾨룞湲곕줈 諛쏆븘 ?몃━???㏓텤?몃떎.
-    // ?좎쭨 root瑜?癒쇱? 留뚮뱺 ??媛??좎쭨?????available channels瑜?鍮꾨룞湲곕줈 諛쏆븘?
-    // ?ъ슜?먭? ??쓣 ???뚮쭔 ?꾩슂???뺣낫留?濡쒕뱶?쒕떎.
+    // Playback tree는 정적 목록이 아니라 "날짜별 서버 조회 결과"를 채워 넣는 lazy tree다.
+    // 날짜 root를 먼저 만들고, 각 날짜별 재생 가능 채널을 비동기로 받아 트리에 채워 넣는다.
+    // 사용자가 탭을 열었을 때만 필요한 정보만 로드한다.
     if (!m_playbackTree) {
         return;
     }
@@ -1095,14 +864,19 @@ void SidebarWidget::reloadPlaybackTree()
     const int generation = m_playbackTreeLoadGeneration;
     m_playbackTree->clear();
 
-    if (!m_playbackService) {
-        new QTreeWidgetItem(m_playbackTree, QStringList() << QStringLiteral("PlaybackService unavailable"));
+    // m_playbackService가 non-null인 건 "서버 설정(apiBaseUrl)이 있었다"는 뜻일 뿐,
+    // "로그인했다"는 뜻이 아니다 — 게스트로 들어가도 로컬에 apiBaseUrl이 남아있으면
+    // 서비스 객체 자체는 만들어진다. 실제로 필요한 건 로그인 여부라서 isAuthenticated도 같이 본다.
+    if (!m_playbackService || !AppState::instance().isAuthenticated) {
+        auto *loginItem = new QTreeWidgetItem(m_playbackTree, QStringList() << QStringLiteral("로그인이 필요한 기능입니다"));
+        loginItem->setFlags(loginItem->flags() & ~(Qt::ItemIsSelectable | Qt::ItemIsDragEnabled));
         return;
     }
 
     const QStringList dates = playbackDateCandidates();
     if (dates.isEmpty()) {
-        new QTreeWidgetItem(m_playbackTree, QStringList() << QStringLiteral("\uB179\uD654 \uC5C6\uC74C"));
+        auto *emptyItem = new QTreeWidgetItem(m_playbackTree, QStringList() << QStringLiteral("\uB179\uD654 \uC5C6\uC74C"));
+        emptyItem->setFlags(emptyItem->flags() & ~(Qt::ItemIsSelectable | Qt::ItemIsDragEnabled));
         return;
     }
 
@@ -1145,7 +919,8 @@ void SidebarWidget::reloadPlaybackTree()
             *pendingCount -= 1;
             if (*pendingCount <= 0) {
                 if (!*addedAnyDate) {
-                    new QTreeWidgetItem(m_playbackTree, QStringList() << QStringLiteral("\uB179\uD654 \uC5C6\uC74C"));
+                    auto *emptyItem = new QTreeWidgetItem(m_playbackTree, QStringList() << QStringLiteral("\uB179\uD654 \uC5C6\uC74C"));
+                    emptyItem->setFlags(emptyItem->flags() & ~(Qt::ItemIsSelectable | Qt::ItemIsDragEnabled));
                 } else {
                     m_playbackTree->sortItems(0, Qt::AscendingOrder);
                 }

@@ -3,62 +3,16 @@
 #include "common_ui.h"
 #include "popup_manager.h"
 
-#include <QComboBox>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
-#include <QListWidget>
 #include <QPushButton>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QTabWidget>
 #include <QVBoxLayout>
-#include <functional>
-#include <memory>
-namespace {
-
-struct ManagedDeviceEntry {
-    QString name;
-    QString type;
-    QString url;
-};
-
-QVector<ManagedDeviceEntry> loadManagedDevices()
-{
-    QVector<ManagedDeviceEntry> result;
-    QSettings settings("TeamClue", "VMS_v1");
-    const int size = settings.beginReadArray("devices");
-    for (int i = 0; i < size; ++i) {
-        settings.setArrayIndex(i);
-        ManagedDeviceEntry e;
-        e.name = settings.value("name").toString().trimmed();
-        e.type = settings.value("type").toString().trimmed();
-        e.url = settings.value("url").toString().trimmed();
-        if (!e.name.isEmpty()) {
-            result.push_back(e);
-        }
-    }
-    settings.endArray();
-
-    return result;
-}
-
-void saveManagedDevices(const QVector<ManagedDeviceEntry> &devices)
-{
-    QSettings settings("TeamClue", "VMS_v1");
-    settings.beginWriteArray("devices");
-    for (int i = 0; i < devices.size(); ++i) {
-        settings.setArrayIndex(i);
-        settings.setValue("name", devices[i].name);
-        settings.setValue("type", devices[i].type);
-        settings.setValue("url", devices[i].url);
-    }
-    settings.endArray();
-}
-
-} // namespace
 
 SettingsDialog::SettingsDialog(QWidget *parent)
     : QDialog(parent)
@@ -78,188 +32,12 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     tabs->setObjectName("settingsTabs");
     root->addWidget(tabs, 1);
 
-    // Device tab
-    auto *devicePage = new QWidget(this);
-    auto *deviceLayout = new QVBoxLayout(devicePage);
-    deviceLayout->setContentsMargins(6, 6, 6, 6);
-    deviceLayout->setSpacing(6);
-    auto *deviceList = new QListWidget(devicePage);
-    deviceList->setObjectName("settingsDeviceList");
-    auto *deviceBtns = new QHBoxLayout();
-    auto *addBtn = new QPushButton("추가", devicePage);
-    auto *updateBtn = new QPushButton("수정", devicePage);
-    auto *deleteBtn = new QPushButton("삭제", devicePage);
-    deviceBtns->addWidget(addBtn);
-    deviceBtns->addWidget(updateBtn);
-    deviceBtns->addWidget(deleteBtn);
-    deviceLayout->addWidget(new QLabel("장치 목록", devicePage));
-    deviceLayout->addWidget(deviceList, 1);
-    deviceLayout->addWidget(new QLabel("목록 더블클릭 또는 [수정]으로 장치 정보를 수정할 수 있습니다.", devicePage));
-    deviceLayout->addLayout(deviceBtns);
-    tabs->addTab(devicePage, "장치 관리");
+    // Phase 6: "장치 관리" 탭(수동 RTSP 장치, QSettings("TeamClue","VMS_v1") 기반)은 제거했다.
+    // ONVIF discovery와 완전히 분리된 레거시 경로였고, 비활성화 상태로만 남겨뒀던 것도
+    // (a) 탭은 잠가놔도 사이드바 채널 트리에는 여전히 그 QSettings 데이터가 "사용자 커스텀 장치"로
+    // 주입되고 있었고 (b) rtspUrlForDisplayName()의 RTSP 폴백으로도 계속 읽히고 있어서 완전히
+    // 죽은 코드가 아니었다 — ONVIF 선택 결과만 신뢰하도록 관련 코드를 전부 정리했다.
 
-    // 이 탭은 QSettings("TeamClue","VMS_v1")에만 저장되고 런타임(AppState.selectedChannelContexts,
-    // ONVIF discovery 결과)과는 완전히 분리되어 있어 여기서 뭘 바꿔도 실제 화면엔 반영되지 않는다.
-    // 수동 RTSP 장치 지원 여부는 Phase 6에서 결정 — 그 전까지는 UGV와 동일하게 비활성화로 대응.
-    auto *deviceDisabledNotice = new QLabel(
-        "이 탭은 현재 런타임 채널 목록과 연동되어 있지 않습니다 (비활성화됨).", devicePage);
-    deviceDisabledNotice->setWordWrap(true);
-    deviceDisabledNotice->setStyleSheet("color: #F37321;");
-    deviceLayout->insertWidget(0, deviceDisabledNotice);
-    devicePage->setEnabled(false);
-
-    auto devices = std::make_shared<QVector<ManagedDeviceEntry>>(loadManagedDevices());
-    auto refreshDeviceList = [deviceList, devices]() {
-        deviceList->clear();
-        for (const auto &d : *devices) {
-            deviceList->addItem(QString("%1 [%2]").arg(d.name, d.type));
-        }
-    };
-    refreshDeviceList();
-
-    std::function<bool(const QString &, ManagedDeviceEntry *)> openDeviceEditor =
-        [this](const QString &title, ManagedDeviceEntry *entry) -> bool {
-            if (!entry) {
-                return false;
-            }
-
-            QDialog editor(this);
-            editor.setObjectName("settingsDialogEditor");
-            editor.setWindowTitle(title);
-            editor.setMinimumWidth(420);
-            editor.winId();
-            applyNativeDarkTitleBar(&editor);
-
-            auto *layout = new QVBoxLayout(&editor);
-            auto *nameEdit = new QLineEdit(&editor);
-            auto *typeBox = new QComboBox(&editor);
-            auto *urlEdit = new QLineEdit(&editor);
-            typeBox->addItems({"CCTV", "UGV"});
-            nameEdit->setPlaceholderText("채널명 (예: Channel 4)");
-            urlEdit->setPlaceholderText("RTSP URL (예: rtsp://127.0.0.1:8554/ch4)");
-            nameEdit->setText(entry->name);
-            typeBox->setCurrentText(entry->type.isEmpty() ? "CCTV" : entry->type);
-            urlEdit->setText(entry->url);
-            layout->addWidget(new QLabel("종류", &editor));
-            layout->addWidget(typeBox);
-            layout->addWidget(new QLabel("채널명", &editor));
-            layout->addWidget(nameEdit);
-            layout->addWidget(new QLabel("RTSP URL", &editor));
-            layout->addWidget(urlEdit);
-
-            auto *btnRow = new QHBoxLayout();
-            auto *okBtn = new QPushButton("완료", &editor);
-            auto *cancelBtn = new QPushButton("취소", &editor);
-            const QSize cancelSize = cancelBtn->sizeHint();
-            okBtn->setFixedSize(cancelSize);
-            cancelBtn->setFixedSize(cancelSize);
-            okBtn->setStyleSheet(QStringLiteral("background: #F37321; color: #FFFFFF;"));
-            btnRow->addStretch();
-            btnRow->addWidget(okBtn);
-            btnRow->addWidget(cancelBtn);
-            layout->addLayout(btnRow);
-            connect(okBtn, &QPushButton::clicked, &editor, &QDialog::accept);
-            connect(cancelBtn, &QPushButton::clicked, &editor, &QDialog::reject);
-
-            if (editor.exec() != QDialog::Accepted) {
-                return false;
-            }
-
-            const QString name = nameEdit->text().trimmed();
-            const QString type = typeBox->currentText().trimmed();
-            const QString url = urlEdit->text().trimmed();
-            if (name.isEmpty() || url.isEmpty()) {
-                PopupManager::showInfo(this, "장치 관리", "장치명과 RTSP URL을 입력해 주세요.");
-                return false;
-            }
-
-            entry->name = name;
-            entry->type = type;
-            entry->url = url;
-            return true;
-        };
-
-    auto hasDuplicateDevice = [devices](const ManagedDeviceEntry &candidate, int selfIndex, QString *error) -> bool {
-        for (int i = 0; i < devices->size(); ++i) {
-            if (i == selfIndex) {
-                continue;
-            }
-            if ((*devices)[i].name == candidate.name) {
-                if (error) {
-                    *error = QString("동일한 장치명이 이미 존재합니다: %1").arg((*devices)[i].name);
-                }
-                return true;
-            }
-            if ((*devices)[i].url == candidate.url) {
-                if (error) {
-                    *error = QString("동일한 RTSP URL이 이미 장치 '%1'에 등록되어 있습니다.").arg((*devices)[i].name);
-                }
-                return true;
-            }
-        }
-        return false;
-    };
-
-    std::function<void()> editSelectedDevice = [this, deviceList, devices, openDeviceEditor, hasDuplicateDevice, refreshDeviceList]() {
-        const int row = deviceList->currentRow();
-        if (row < 0 || row >= devices->size()) {
-            PopupManager::showInfo(this, "장치 관리", "수정할 장치를 선택해 주세요.");
-            return;
-        }
-
-        ManagedDeviceEntry edited = (*devices)[row];
-        if (!openDeviceEditor("장치 수정", &edited)) {
-            return;
-        }
-
-        QString dupError;
-        if (hasDuplicateDevice(edited, row, &dupError)) {
-            PopupManager::showInfo(this, "장치 관리", dupError);
-            return;
-        }
-
-        (*devices)[row] = edited;
-        saveManagedDevices(*devices);
-        m_devicesChanged = true;
-        refreshDeviceList();
-        deviceList->setCurrentRow(row);
-    };
-
-    connect(deviceList, &QListWidget::itemDoubleClicked, this, [editSelectedDevice](QListWidgetItem *) {
-        editSelectedDevice();
-    });
-    connect(addBtn, &QPushButton::clicked, this, [this, devices, openDeviceEditor, hasDuplicateDevice, refreshDeviceList]() {
-        ManagedDeviceEntry added;
-        if (!openDeviceEditor("장치 추가", &added)) {
-            return;
-        }
-
-        QString dupError;
-        if (hasDuplicateDevice(added, -1, &dupError)) {
-            PopupManager::showInfo(this, "장치 관리", dupError);
-            return;
-        }
-
-        devices->push_back(added);
-        saveManagedDevices(*devices);
-        m_devicesChanged = true;
-        refreshDeviceList();
-    });
-    connect(updateBtn, &QPushButton::clicked, this, [editSelectedDevice]() {
-        editSelectedDevice();
-    });
-    connect(deleteBtn, &QPushButton::clicked, this, [this, deviceList, devices, refreshDeviceList]() {
-        const int row = deviceList->currentRow();
-        if (row < 0 || row >= devices->size()) {
-            PopupManager::showInfo(this, "장치 관리", "삭제할 장치를 선택해 주세요.");
-            return;
-        }
-
-        devices->removeAt(row);
-        saveManagedDevices(*devices);
-        m_devicesChanged = true;
-        refreshDeviceList();
-    });
     // Path tab
     auto *pathPage = new QWidget(this);
     auto *pathLayout = new QVBoxLayout(pathPage);
@@ -373,13 +151,5 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     policyLayout->addWidget(policyInfoLabel);
     policyLayout->addStretch();
     tabs->addTab(policyPage, "정책");
-
 }
-
-bool SettingsDialog::devicesChanged() const
-{
-    return m_devicesChanged;
-}
-
-
 

@@ -172,7 +172,6 @@ PlaybackScreen::PlaybackScreen(QWidget *parent)
 
     m_playbackFileLabel = new QLabel("트리에서 재생할 항목을 선택하세요.", content);
     m_playbackFileLabel->setObjectName("playbackFileLabel");
-    m_playbackFileLabel->hide();
 
     m_videoHost = new QFrame(content);
     m_videoHost->setObjectName("videoCell");
@@ -224,6 +223,7 @@ PlaybackScreen::PlaybackScreen(QWidget *parent)
     timelineLayout->addWidget(m_timelineSlider, 1);
     timelineLayout->addWidget(m_totalTimeLabel);
 
+    contentLayout->addWidget(m_playbackFileLabel);
     contentLayout->addWidget(m_videoHost, 1);
     contentLayout->addWidget(timeline);
 
@@ -455,6 +455,13 @@ void PlaybackScreen::setPlaybackService(PlaybackService *service)
     }
     if (auto *sidebar = findChild<SidebarWidget *>()) {
         sidebar->setPlaybackService(service);
+    }
+    // service가 있어도(=apiBaseUrl 설정만 있어도) 로그인 전이면 실제로 쓸 수 없는 기능이라
+    // 사이드바(SidebarWidget::reloadPlaybackTree)와 같은 조건으로 영상 영역에도 안내한다.
+    if (!service || !AppState::instance().isAuthenticated) {
+        m_playbackFileLabel->setText(QStringLiteral("로그인이 필요한 기능입니다"));
+    } else {
+        m_playbackFileLabel->setText(QStringLiteral("트리에서 재생할 항목을 선택하세요."));
     }
 }
 

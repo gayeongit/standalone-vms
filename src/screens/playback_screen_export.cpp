@@ -63,6 +63,36 @@ void showExportButtonDone(QWidget *owner, QPushButton *button)
         clearExportButtonFeedback(button);
     });
 }
+
+// Phase 6: 서버가 준 파일명에서 디렉터리 성분(경로 traversal 포함)을 제거하고 순수 파일명만 남긴다.
+// QFileInfo::fileName()은 "/"/"\\" 앞부분과 ".."로 시작하는 경로 조작을 자연스럽게 걸러낸다.
+QString sanitizeExportFileName(const QString &rawFileName)
+{
+    const QString name = QFileInfo(rawFileName.trimmed()).fileName();
+    if (name.isEmpty() || name == QStringLiteral(".") || name == QStringLiteral("..")) {
+        return QString();
+    }
+    return name;
+}
+
+// Phase 6: 두 URL이 scheme+host+port까지 같은 origin인지 비교한다 — Bearer 토큰을 외부 URL에
+// 실수로 흘려보내지 않기 위한 판단 기준. apiBaseUrl이 비어 있으면(서버 미설정) 항상 false.
+bool isSameOrigin(const QUrl &a, const QUrl &b)
+{
+    if (!a.isValid() || !b.isValid()) {
+        return false;
+    }
+    const auto effectivePort = [](const QUrl &url) {
+        const int port = url.port(-1);
+        if (port >= 0) {
+            return port;
+        }
+        return url.scheme().compare(QStringLiteral("https"), Qt::CaseInsensitive) == 0 ? 443 : 80;
+    };
+    return a.scheme().compare(b.scheme(), Qt::CaseInsensitive) == 0
+        && a.host().compare(b.host(), Qt::CaseInsensitive) == 0
+        && effectivePort(a) == effectivePort(b);
+}
 } // namespace
 
 bool PlaybackScreen::isExportBusy() const
@@ -339,10 +369,12 @@ void PlaybackScreen::startExportDownload(const QString &url, const QString &file
         PopupManager::showInfo(this, "내보내기 저장 경로", dirError);
     }
 
-    QString suggestedName = fileName.trimmed();
+    // Phase 6: 서버가 준 파일명을 그대로 저장 경로에 붙이면 "../../evil.exe" 같은 경로 조작이
+    // 가능했다 — sanitizeExportFileName()으로 디렉터리 성분을 제거한 순수 파일명만 쓴다.
+    QString suggestedName = sanitizeExportFileName(fileName);
     if (suggestedName.isEmpty()) {
         const QUrl exportUrl(url);
-        suggestedName = QFileInfo(exportUrl.path()).fileName();
+        suggestedName = sanitizeExportFileName(QFileInfo(exportUrl.path()).fileName());
         if (suggestedName.isEmpty()) {
             suggestedName = QStringLiteral("playback_export_%1.mp4")
                 .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss")));
@@ -382,10 +414,19 @@ void PlaybackScreen::startExportDownload(const QString &url, const QString &file
 
     QNetworkRequest request{downloadUrl};
     request.setRawHeader("Accept", "*/*");
-    const QString accessToken = AppState::instance().accessToken.trimmed();
-    if (!accessToken.isEmpty()) {
-        request.setRawHeader("Authorization", QByteArray("Bearer ").append(accessToken.toUtf8()));
+    // Phase 6: 다운로드 URL이 API 서버와 같은 origin일 때만 Bearer 토큰을 붙인다 — 서버가 외부
+    // 스토리지(서명된 URL 등)를 가리키는 URL을 내려줘도 우리 세션 토큰이 거기로 새지 않게 막는다.
+    const QUrl apiBaseUrl(AppState::instance().apiBaseUrl.trimmed());
+    if (isSameOrigin(downloadUrl, apiBaseUrl)) {
+        const QString accessToken = AppState::instance().accessToken.trimmed();
+        if (!accessToken.isEmpty()) {
+            request.setRawHeader("Authorization", QByteArray("Bearer ").append(accessToken.toUtf8()));
+        }
     }
+    // 리다이렉트를 자동으로 안 따라간다 — 자동으로 따라가면 위의 origin 판단이 리다이렉트
+    // 이후에는 재검증되지 않아 다른 origin으로 토큰이 넘어갈 수 있다. 리다이렉트 응답은
+    // finished 핸들러의 HTTP status 체크에서 실패로 처리된다.
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
     m_exportDownloadAbortRequested = false;
     m_exportDownloadReply = m_exportDownloadManager->get(request);
     updateExportUiState();
@@ -399,8 +440,14 @@ void PlaybackScreen::startExportDownload(const QString &url, const QString &file
     });
 
     connect(m_exportDownloadReply, &QNetworkReply::finished, this, [this, savePath, actionStatusLabel]() {
+        // HTTP status도 같이 봐야 한다 — ManualRedirectsPolicy 때문에 3xx 응답은 네트워크 계층
+        // error()가 NoError로 남을 수 있고, 그걸 그냥 두면 리다이렉트 응답 본문을 파일로 저장해버린다.
+        const int httpStatus = m_exportDownloadReply
+            ? m_exportDownloadReply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt()
+            : 0;
         const bool ok = m_exportDownloadReply
-            && m_exportDownloadReply->error() == QNetworkReply::NoError;
+            && m_exportDownloadReply->error() == QNetworkReply::NoError
+            && httpStatus >= 200 && httpStatus < 300;
         bool writeOk = true;
         if (m_exportDownloadReply) {
             writeOk = (!m_exportSaveFile || m_exportSaveFile->write(m_exportDownloadReply->readAll()) >= 0);

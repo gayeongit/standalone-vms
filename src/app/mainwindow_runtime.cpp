@@ -15,35 +15,11 @@ using namespace MainWindowInternal;
 
 void MainWindow::openSettingsDialog()
 {
+    // Phase 6: "장치 관리" 탭 제거 이후로는 이 다이얼로그에서 런타임 채널 선택에 영향을 주는
+    // 변경이 발생하지 않는다(저장 경로/정책 탭만 남음) — devicesChanged() 이후 처리 로직도 같이 제거.
     SettingsDialog extractedDialog(this);
     extractedDialog.exec();
-    if (extractedDialog.devicesChanged()) {
-        auto &state = AppState::instance();
-        pruneStateDeviceSelection(state);
-        applyDeviceChangesToRuntimeState(state);
-        rebuildRuntimeScreens();
-    }
 }
-void MainWindow::rebuildRuntimeScreens()
-{
-    // 설정 변경 후 런타임 화면을 재조립하는 진입점이다.
-    // 기존 런타임 화면을 버리고 새로 만들되, 가능하면 사용자가 있던 화면으로 다시 복귀시킨다.
-    // 현재 화면이 런타임 화면이면 같은 ScreenId로 복귀시켜 컨텍스트를 보존하고,
-    // 아니면 Main으로 안전하게 되돌린다.
-    auto showSettingsDialog = [this]() {
-        openSettingsDialog();
-    };
-
-    const ScreenId current = AppState::instance().currentScreen;
-    createRuntimeScreens(showSettingsDialog);
-
-    if (current == ScreenId::Main || current == ScreenId::Cctv || current == ScreenId::Ugv || current == ScreenId::Playback) {
-        showScreen(current);
-        return;
-    }
-    showScreen(ScreenId::Main);
-}
-
 void MainWindow::destroyRuntimeScreens()
 {
     if (m_mainScreen) {

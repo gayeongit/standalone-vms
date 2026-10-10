@@ -1,21 +1,74 @@
 # standalone-vms
 
-서버 의존성을 제거한 VMS 클라이언트. 배경/설계 원칙은 `CLAUDE.md`, `docs/roadmap.md` 참고.
+서버 없이 동작하는 VMS 클라이언트.
 
-## 설정 파일
+팀 프로젝트 [VEDA3-CLUE-VMS](https://github.com/gayeongit/VEDA3-CLUE-VMS)(`v2` 브랜치)의 VMS 파트를 기반으로, 서버를 거치던 장치 조회·카메라 제어·이벤트 수신을 카메라와의 직접 통신으로 바꿨습니다. 서버는 로그인 같은 선택 기능으로만 남습니다.
 
-`app_config.json`은 서버(로그인/이벤트/Playback) 설정을 담는 파일이라 `.gitignore`되어 있다.
-`app_config.example.json`을 복사해서 만들면 되고, **이 파일 자체가 없어도 게스트로 로컬 카메라(ONVIF)
-경로는 정상 동작한다** — `apiBaseUrl`이 없으면 로그인/서버 이벤트/서버 Playback만 비활성화되고,
-`DeviceCheckScreen`의 ONVIF discovery와 Main의 RTSP 재생/PTZ 제어는 그대로 쓸 수 있다.
+| | 원본 | 이번 프로젝트 |
+|---|---|---|
+| 장치/채널 조회 | 서버 REST (호출 7~9회) | ONVIF WS-Discovery + `GetProfiles` |
+| zoom / focus | 서버 REST 프록시 | ONVIF PTZ / Imaging SOAP |
+| 카메라 계정 | 서버가 대신 인증 | 로컬 입력 (게스트는 세션만, 로그인은 QtKeychain 저장) |
+| 이벤트 수신 | 카메라 → 서버 → WS | 카메라 → UDP 직접 수신 |
 
-```bash
-cp app_config.example.json app_config.json
-# 서버를 쓸 계획이 있으면 apiBaseUrl 등을 채운다. 없으면 그대로 두고 "게스트로 시작"만 쓰면 된다.
+## 화면
+
+| | |
+|---|---|
+| ![장치 탐색](docs/screenshot/장치탐색.png) | ![자격증명](docs/screenshot/자격증명.png) |
+| 장치 탐색 | 카메라 계정 입력 |
+
+![메인](docs/screenshot/메인.png)
+RTSP 멀티뷰와 로컬 이벤트 목록
+
+![전체화면 제어](docs/screenshot/전체화면_제어.png)
+단일 채널 전체화면과 zoom / focus 제어
+
+| | |
+|---|---|
+| ![알림센터](docs/screenshot/알림센터.png) | ![이벤트검색](docs/screenshot/이벤트검색.png) |
+| 알림센터 | 이벤트 검색 |
+
+## 구조
+
+```
+UI           screens / ui
+Application  DeviceService · CctvControlService · EventService · ...
+Infra        OnvifLiteClient · LocalEventListener · CredentialStore   (서버 없이 동작)
+             RestClient · WsClient                                    (서버 있을 때만)
+Media        StreamPlayer · ChannelSessionManager · ...
+State        AppState
 ```
 
-## 게스트로 실행
+화면·미디어 계층과 서비스 인터페이스는 그대로 두고 서비스 내부 구현만 교체했습니다. 자세한 구조는 [docs/core_classes.md](docs/core_classes.md)에 있습니다.
 
-1. `mock_camera_host/`를 먼저 띄운다 (`onvif_mock.exe`, `mediamtx.exe`+ffmpeg — 실행 방법/포트는 `docs/dev_execution_plan.md`의 Phase 0 섹션 참고).
-2. `VMS_v2`를 실행하고 로그인 화면에서 "게스트로 시작"을 누른다.
-3. 장치 확인 화면에서 ONVIF discovery로 발견된 채널을 선택하고 "VMS 시작"을 누르면 Main으로 진입한다.
+## 실행
+
+Windows, Qt 6.8, MSVC, GStreamer 기준입니다.
+
+```bash
+# 앱
+cmake -B build
+cmake --build build --target VMS_v2
+
+# 목업 카메라 호스트
+cmake -S mock_camera_host -B mock_camera_host/build -DCMAKE_PREFIX_PATH=C:/Qt/6.8.3/msvc2022_64
+cmake --build mock_camera_host/build
+```
+
+목업 호스트에서 `onvif_mock.exe`, `event_broadcaster.exe`, mediamtx(+ffmpeg)를 실행한 뒤 앱에서 **게스트로 시작**을 누르면 됩니다. 카메라 계정은 `admin` / `admin1234`입니다.
+
+`app_config.json`은 선택 사항입니다. 서버를 쓸 때만 `app_config.example.json`을 복사해서 채우면 됩니다.
+
+## 제한 사항
+
+- 실제 카메라가 아닌 목업 호스트로만 검증했습니다.
+- Playback은 녹화 서버가 필요해서 범위에서 뺐고, 로그인 상태에서만 동작합니다.
+- 로컬 UDP 이벤트는 인증이 없어 신뢰할 수 있는 LAN을 전제로 합니다.
+- 자동 테스트 없이 수동 시나리오로 검증했습니다.
+
+## 문서
+
+- [docs/roadmap.md](docs/roadmap.md) — 단계별 계획
+- [docs/dev_execution_plan.md](docs/dev_execution_plan.md) — Phase별 작업 기록
+- [docs/refactoring_improvements.md](docs/refactoring_improvements.md) — 개선 내용 요약

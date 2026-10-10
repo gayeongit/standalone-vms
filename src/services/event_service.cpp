@@ -279,27 +279,9 @@ void EventService::ingestEventObject(const QJsonObject &eventObject)
 {
     const QString eventId = extractEventId(eventObject);
     const EventInfo event = buildEventInfo(eventObject);
-    if (isTelemetryEventType(event.type)) {
+    if (!tryInsertEvent(event, eventId, /*prepend=*/true)) {
         return;
     }
-    if (event.timestamp.isEmpty() || event.channel.isEmpty() || event.type.isEmpty()) {
-        return;
-    }
-
-    const QString key = dedupeKey(eventId, event);
-    if (m_seenKeys.contains(key)) {
-        return;
-    }
-
-    m_seenKeys.insert(key);
-    m_eventIdByFallbackKey.insert(dedupeKey(QString(), event), eventId);
-    if (!eventId.isEmpty()) {
-        if (m_latestEvent.timestamp.isEmpty() || isNewerEvent(event, m_latestEvent)) {
-            m_lastEventId = eventId;
-            m_latestEvent = event;
-        }
-    }
-    m_events.prepend(event);
     ++m_unreadCount;
     trimCache();
     notifyEventsChanged();
@@ -345,21 +327,11 @@ void EventService::mergeEventArray(const QJsonArray &items, bool markUnread)
             continue;
         }
 
-        const QString key = dedupeKey(eventId, event);
-        if (m_seenKeys.contains(key)) {
+        if (!tryInsertEvent(event, eventId, /*prepend=*/false)) {
             logMergeEvent(QStringLiteral("skip"), QStringLiteral("duplicate"));
             continue;
         }
 
-        m_seenKeys.insert(key);
-        m_eventIdByFallbackKey.insert(dedupeKey(QString(), event), eventId);
-        if (!eventId.isEmpty()) {
-            if (m_latestEvent.timestamp.isEmpty() || isNewerEvent(event, m_latestEvent)) {
-                m_lastEventId = eventId;
-                m_latestEvent = event;
-            }
-        }
-        m_events.append(event);
         if (markUnread) {
             ++unreadDelta;
         }
@@ -396,12 +368,12 @@ void EventService::trimCache()
     EventInfo rebuiltLatest;
     QString rebuiltLastEventId;
     for (const EventInfo &event : std::as_const(m_events)) {
-        const QString fallbackKey = dedupeKey(QString(), event);
+        const QString fallbackKey = fallbackDedupeKey(event);
         rebuiltKeys.insert(fallbackKey);
         const QString preservedId = m_eventIdByFallbackKey.value(fallbackKey);
         if (!preservedId.isEmpty()) {
             // Keep both fallback-key and eventId-key dedupe after cache trim.
-            rebuiltKeys.insert(preservedId);
+            rebuiltKeys.insert(idDedupeKey(preservedId));
             rebuiltIds.insert(fallbackKey, preservedId);
             if (rebuiltLatest.timestamp.isEmpty() || isNewerEvent(event, rebuiltLatest)) {
                 rebuiltLatest = event;
@@ -547,17 +519,57 @@ bool EventService::isLikelyEventObject(const QJsonObject &object)
         || hasIds;
 }
 
-QString EventService::dedupeKey(const QString &eventId, const EventInfo &event)
+QString EventService::fallbackDedupeKey(const EventInfo &event)
 {
-    if (!eventId.isEmpty()) {
-        return eventId;
-    }
-    return QStringLiteral("%1|%2|%3|%4|%5")
+    // "fp:" 프리픽스로 서버가 준 eventId 문자열과 우연히 겹치는 걸 방지한다.
+    return QStringLiteral("fp:%1|%2|%3|%4|%5")
         .arg(event.timestamp)
         .arg(QString::number(event.channelId))
         .arg(event.channel.trimmed())
         .arg(event.type.trimmed())
         .arg(QString::number(event.deviceId));
+}
+
+QString EventService::idDedupeKey(const QString &eventId)
+{
+    const QString trimmed = eventId.trimmed();
+    return trimmed.isEmpty() ? QString() : QStringLiteral("id:%1").arg(trimmed);
+}
+
+bool EventService::tryInsertEvent(const EventInfo &event, const QString &eventId, bool prepend)
+{
+    if (isTelemetryEventType(event.type)) {
+        return false;
+    }
+    if (event.timestamp.isEmpty() || event.channel.isEmpty() || event.type.isEmpty()) {
+        return false;
+    }
+
+    // eventId 키와 fallback 키를 항상 둘 다 확인한다 — 로컬(UDP, eventId 없음)과 서버 relay
+    // (eventId 있음)로 같은 물리적 이벤트가 들어와도 어느 한쪽 키로 이미 봤으면 중복 처리된다.
+    const QString fallbackKey = fallbackDedupeKey(event);
+    const QString idKey = idDedupeKey(eventId);
+    if (m_seenKeys.contains(fallbackKey) || (!idKey.isEmpty() && m_seenKeys.contains(idKey))) {
+        return false;
+    }
+
+    m_seenKeys.insert(fallbackKey);
+    if (!idKey.isEmpty()) {
+        m_seenKeys.insert(idKey);
+    }
+    m_eventIdByFallbackKey.insert(fallbackKey, eventId.trimmed());
+    if (!eventId.trimmed().isEmpty()) {
+        if (m_latestEvent.timestamp.isEmpty() || isNewerEvent(event, m_latestEvent)) {
+            m_lastEventId = eventId.trimmed();
+            m_latestEvent = event;
+        }
+    }
+    if (prepend) {
+        m_events.prepend(event);
+    } else {
+        m_events.append(event);
+    }
+    return true;
 }
 
 bool EventService::isNewerEvent(const EventInfo &lhs, const EventInfo &rhs)

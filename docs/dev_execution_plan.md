@@ -320,7 +320,7 @@ Phase 3b 완료.
 
 ### 배경 (2026-09-16)
 
-Phase 3b 완료 후, 코덱스에게 지금까지의 구현을 리뷰받아 `docs/code_review_stabilization_plan.md`로 정리했다. 결론은: Phase 0~3b의 핵심 방향(서버 의존성 제거, AppState 접점, 서비스 인터페이스 유지)은 잘 맞고 있지만, "목업 기준으로는 통과하지만 실제로는 문제가 되는" 항목들이 남아있어 Phase 4 진입 전에 안정화가 필요하다는 것.
+Phase 3b 완료 후, 코덱스에게 지금까지의 구현을 리뷰받아 `docs/code_review_stabilization_plan.md`(이 파일은 Phase 6 문서 정리 때 삭제, 아래 내용이 그 요약)로 정리했다. 결론은: Phase 0~3b의 핵심 방향(서버 의존성 제거, AppState 접점, 서비스 인터페이스 유지)은 잘 맞고 있지만, "목업 기준으로는 통과하지만 실제로는 문제가 되는" 항목들이 남아있어 Phase 4 진입 전에 안정화가 필요하다는 것.
 
 리뷰에서 나온 항목 중 자동 테스트(Qt Test 도입, 리뷰의 4.3)은 스코프에서 제외하기로 결정 — 개인 포트폴리오 프로젝트 속도 대비 투자 가치가 낮다고 판단. 나머지는 아래처럼 우선순위를 나눠서 진행한다.
 
@@ -352,7 +352,7 @@ Phase 3b 완료 후, 코덱스에게 지금까지의 구현을 리뷰받아 `doc
 **지금 안 한다 (명시적 보류)**:
 - 리뷰 4.3(Qt Test 자동화 기반 도입) — 사용자 결정으로 스코프 제외.
 - 리뷰 4.2 중 구조적인 것(SOAP 파싱을 `QXmlStreamReader`로 전면 교체, PTZ `ProfileToken`/Imaging `VideoSourceToken` 실제 분리) — 클라이언트+mock 양쪽을 다 고쳐야 하는 규모라 Phase 3b 안정화 패치보다 큰 작업. **실제 ONVIF 카메라로 테스트할 시점**으로 미룬다. mock 대상으로만 검증하는 현 단계에서는 CLAUDE.md의 "ONVIF 풀스펙 구현 안 함" 스코프와도 맞음.
-- 리뷰 4.2/8절의 나머지 실제-카메라 호환성 항목, Phase 5/6 섹션(다운로드 보안 경계, AppState 분해, 대형 파일 분할 등)은 `docs/code_review_stabilization_plan.md`에 그대로 남겨두고 해당 Phase 진입 시 재확인.
+- 리뷰 4.2/8절의 나머지 실제-카메라 호환성 항목, Phase 5/6 섹션(다운로드 보안 경계, AppState 분해, 대형 파일 분할 등)은 해당 Phase 진입 시 재확인하기로 하고 보류(원본 리뷰 문서 `docs/code_review_stabilization_plan.md`는 Phase 6 문서 정리 때 삭제됨 — 다운로드 보안 경계는 Phase 6에서 실제로 구현 완료, AppState 분해/대형 파일 분할은 이번 Phase 6 스코프 밖으로 재확인, 아래 "Phase 6 마무리 라운드" 섹션 참고).
 
 ### 작업 목록
 
@@ -399,7 +399,7 @@ Phase 3b 완료 후, 코덱스에게 지금까지의 구현을 리뷰받아 `doc
 - **맞음, 그리고 더 심각했음 — "삭제 안 됨"**: `app_config.json`을 지워도 `build/app_config.json`(이전 복사본)이 안 지워지는 것 자체는 맞았다. 직접 재현해보니 원인이 리뷰가 지적한 것보다 하나 더 있었다 — `POST_BUILD`로 `VMS_v2` 타깃에 커맨드를 붙이면, 소스 변경이 없어 relink가 안 일어나는 재빌드에서는 ninja가 그 커맨드 체인 자체를 스킵해버려서 "파일만 지우고 소스는 안 건드린 채 재빌드"하는 시나리오에서 정리가 전혀 안 됨. 출력 추적이 없는 별도 `add_custom_target(sync_app_config ALL ...)`로 분리하고 `add_dependencies(VMS_v2 sync_app_config)`로 항상 실행되게 고침. 원본이 없으면 출력 폴더의 복사본도 지우도록(이전엔 스킵만 하고 안 지웠음) 같이 수정. 복사/삭제 양쪽 다 재현 테스트로 확인.
 - **맞음 — "틀린 자격증명을 ping 검증 전에 QtKeychain에 영구 저장"**: 로그인 상태에서 틀린 비밀번호를 입력하면 ping 검증 전에 이미 QtKeychain에 저장되고, ping 실패 시 세션 캐시만 지워서 QtKeychain에는 틀린 값이 영구히 남는 문제였음. `CredentialStore::save()` 호출을 ping 성공 콜백 안으로 옮겨서, 검증된 자격증명만 영구 저장되게 수정 ([mainwindow_auth.cpp](../src/app/mainwindow_auth.cpp)의 `relativeMove` ping 콜백).
 - **부수 반영**: 자격증명 모달의 OK 버튼 활성화 조건에 비밀번호도 포함(기존엔 아이디만 검사). 이 문서(작업 목록 7번)의 "QObject 헬퍼로 교체" 표현이 실제 구현(멤버 함수/멤버 상태 방식)과 안 맞아서 문구 수정.
-- **동의하되 지금 안 함**: 자격증명 두 키(username/password) 저장이 원자적이지 않은 문제(한쪽만 실패해도 롤백 없음)는 리뷰가 맞게 짚었지만, `docs/code_review_stabilization_plan.md` 8절에 이미 Phase 6 대상으로 기록되어 있던 항목이라 지금 범위에는 안 넣음. `device.source=server`인데 `apiBaseUrl`이 비었을 때의 에러 메시지 개선은 실제로 발생할 일이 없는 자기모순적 설정 조합이라 우선순위 낮음으로 보류.
+- **동의하되 지금 안 함(→ 이후 Phase 6에서 실제로 처리함)**: 자격증명 두 키(username/password) 저장이 원자적이지 않은 문제(한쪽만 실패해도 롤백 없음)는 리뷰가 맞게 짚었지만, 당시 리뷰 문서(`code_review_stabilization_plan.md`, 이후 삭제) 8절에 이미 Phase 6 대상으로 기록되어 있던 항목이라 이 라운드 범위에는 안 넣음 — 실제로 Phase 6에서 `CredentialStore`를 단일 JSON 레코드 저장으로 전환해서 해결(아래 "Phase 6 마무리 라운드" 섹션 참고). `device.source=server`인데 `apiBaseUrl`이 비었을 때의 에러 메시지 개선은 실제로 발생할 일이 없는 자기모순적 설정 조합이라 우선순위 낮음으로 계속 보류.
 - **추가로 짚어준 비차단 항목(3차 리뷰, 2026-09-17)**: QtKeychain에서 로드된 자격증명은 "이미 검증된 것"으로 취급해 ping 재검증을 안 한다 — 카메라 비밀번호가 나중에 바뀌거나 예전에 잘못 저장된 값이 있으면, 재입력 모달 없이 계속 조용히 실패(RTSP/PTZ 인증 실패)만 반복될 수 있다. 로그인 상태 자체가 이 환경에서 테스트 불가능해서 지금 오염된 값이 있을 수도 없고, 고치려면 캐시 히트도 매번 ping 검증하게 만들어야 하는데 그건 Phase 3b가 의도적으로 피한 "매번 네트워크 왕복" 비용을 다시 불러온다 — 트레이드오프라 지금은 기록만 해두고 실제 로그인 경로가 생기는 시점(서버 연동 또는 Phase 6)에 다시 판단.
 
 Phase 3b 안정화 패치 완료.
@@ -459,11 +459,185 @@ Phase 3b 안정화 패치 완료.
 
 리뷰 문서 5.2절이 요구했던 "UDP burst 상황에서도 매번 전체 재렌더링하지 않는다"는 **이미 이 기존 코드가 처리하고 있어서 새로 만들 필요 없음** — 이전에 "지금 단계에서 디바운스 추가 안 함"으로 기록했던 건 착오였고, 사실은 이미 있었다.
 
+### 알려진 제약: 로그인 시 로컬/서버 이벤트 중복 가능성 (2026-09-19)
+
+Phase 6 진입 전 다시 짚어본 질문: "원래 의도는 장치 탐색/PTZ는 로그인 여부와 무관하게 항상 ONVIF, 이벤트만 게스트=로컬만/로그인=서버 병행이었는데, 실제로 그렇게 됐나?"
+
+**장치 탐색/PTZ는 의도대로다** — `DeviceService`/`CctvControlService`/`OnvifLiteClient` 전체에 `isAuthenticated` 참조가 단 한 줄도 없음(grep으로 확인). `device.source` 설정은 로그인 여부와 완전히 무관한 별개 축이라, 로그인해도 항상 ONVIF로 탐색·제어한다.
+
+**이벤트는 "게스트 vs 로그인" 분기가 아니라 "로컬은 항상 켜짐 + 로그인 시 서버가 추가로 얹힘"이다** — `LocalEventListener::eventReceived → ingestLocalEvent` 연결에 `isAuthenticated` 체크가 없다(`mainwindow_auth.cpp:582-584`). `isAuthenticated` 가드는 WS 쪽(`connected`/`jsonMessageReceived` 핸들러)에만 있음. 즉 로그인해도 로컬 UDP 수신은 그대로 유지된 채 서버 WS/REST 히스토리가 추가되는 구조 — 게스트가 받던 걸 잃는 게 아니라 로그인하면 더 받는 것. 이 자체는 의도와 일치.
+
+**진짜 열린 문제**: 실제 서버가 "카메라가 쏘는 그 UDP 이벤트를 서버도 똑같이 받아서 WS로 relay"하는 구조라면, 로그인 상태에서 같은 물리적 이벤트 하나가 로컬 UDP(직접 수신)와 서버 WS(relay) 양쪽으로 들어올 수 있다. `EventService`의 dedup 캐시는 `eventId`가 있으면 그걸로, 없으면 `timestamp|channelId|channel|type|deviceId` 조합으로 키를 만드는데, 로컬 원본과 서버가 relay한 버전의 타임스탬프 포맷·채널명 표기가 조금이라도 다르면 dedup이 "다른 이벤트"로 착각해 대시보드에 중복 표시될 수 있다.
+
+이 프로젝트엔 실제 서버 코드 자체가 없어서 지금 이 시나리오를 검증할 방법이 없다(QtKeychain 영구 저장 테스트를 스킵했던 것과 같은 이유). 지금 억지로 dedup 포맷을 맞추려 하지 않고, **실서버 연동 시점에 재검증이 필요한 알려진 제약사항**으로만 기록해둔다.
+
 Phase 4 완료.
 
 ---
 
-## 다음 Phase 메모
+## Phase 5 스킵 결정 (2026-09-17)
 
-- Phase 4 착수. 위 작업 순서대로 구현 진행.
-- 이후 Phase 5(선택) → 6 순으로 진행. Phase 5/6 착수 시 `docs/code_review_stabilization_plan.md`의 해당 섹션(다운로드 보안 경계, AppState 분해 등) 재확인.
+Phase 6 착수 전 Phase 5(Playback) 진입 여부를 검토했다. 검토 중 "이벤트 상세에서 그 시점 영상 바로 보기(대시보드/이벤트 검색 양쪽에서)", "이벤트 발생 시 스냅샷 자동 촬영" 두 확장 아이디어가 나왔는데, 둘 다 의미 있으려면 실제 녹화 아카이브(=서버)가 필요하고, 게스트 모드의 세션 휘발성 히스토리나 로컬 mediamtx 루프 목업으로는 흉내조차 낼 수 없다 — 억지로 만들면 설계 원칙 4(목업 정교화 불필요)에 부딪힌다. `CLAUDE.md` 설계 원칙 3("이벤트 히스토리는 로그인 부가 기능")이 이미 이 경계를 정해두고 있어서, 서버 없이 동작이라는 이 프로젝트 핵심 스코프 밖으로 판단해 Phase 5 자체를 스킵하기로 결정(원래도 로드맵상 선택 사항이었음).
+
+두 아이디어는 `docs/refactoring_improvements.md` 6절에 기록해두고, 서버가 실제로 연동되는 시점에 재검토. 게스트 모드에서 Playback 화면이 날것의 `"PlaybackService unavailable"` placeholder를 보여주는 것(`common_widgets.cpp`)만 Phase 6에서 UGV/장치관리 탭과 같은 패턴으로 정리할 것.
+
+---
+
+## Phase 6. 통합 검증 + 문서 정리
+
+### 진입 전 조사 (2026-09-19)
+
+착수 전에 코덱스에게 Phase 6 진입 계획(로드맵에 적어둔 항목들) 검토를 받았다. 대부분 정확했고, 일부는 이미 알고 있던 것의 재확인, 일부는 진짜 새 발견이었다. 검증 결과:
+
+- **틀렸던 것(코덱스가 인정하고 철회)**: ONVIF `VideoSourceToken` 분리를 Phase 6 상위 우선순위로 올린 것 — 이미 Phase 3b 안정화 패치 때 "실카메라 연동 시점까지 보류"로 합의한 사항이라, 재검토할 이유가 새로 생긴 게 아님. 알려진 제약사항으로 문서화만 하고 구현은 계속 보류.
+- **맞지만 새 발견은 아니었던 것**: Playback 다운로드 보안(외부 origin에 Bearer 토큰 전달, 서버 파일명을 그대로 경로에 결합) — 이미 당시 리뷰 문서(`code_review_stabilization_plan.md`, 이후 Phase 6 문서 정리 때 삭제) 6절에서 확인하고 Phase 5 스킵 시 Phase 6로 옮겨뒀던 것과 동일. 이번 라운드에서 실제로 구현 완료(아래 대상/작업 섹션 참고).
+- **진짜 새로 발견한 것**: `src/ui/common_widgets.cpp`에 실제 mojibake(깨진 한글)가 남아있음 — 사용자 노출 문자열 1곳(`addPlaybackChannelsToDateRoot`의 조회 실패 트리 항목) + 주석 3곳(`reloadPlaybackTree` 함수 설명). 전에 "깨진 한글 이미 다 고쳐짐"이라고 확인했던 건 `mainwindow_auth.cpp`만 본 거였고, 이 파일은 못 봤었음. 전체 재검색 결과 이 파일 하나에만 몰려 있음(다른 곳엔 없음).
+- **직접 확인해서 추가로 찾은 것**: `CMakeLists.txt`의 `install()`이 실제 `app_config.json`(서버 주소 포함)을 그대로 설치 패키지에 넣음. `src/core/screens.cpp`/`include/core/screens.h`는 자기 자신만 참조하는 완전한 죽은 umbrella 헤더. `PlaybackScreen`의 200ms 타임라인 타이머가 화면이 안 보일 때도 안 멈춤(낮은 우선순위).
+- **빌드 정지 이슈는 프로젝트 결함으로 보지 않음**: 코덱스 환경에서 재빌드가 멈췄다고 보고했으나, 이 세션에서는 매번 vcvars64.bat 로드 후 빠르게 링크까지 성공했음 — 코덱스 쪽 MSVC 환경변수 미설정 문제로 추정. clean build 검증 자체는 완료 기준으로 유지.
+
+### 스코프 결정
+
+**이번 라운드에서 한다** (아래 대상/작업):
+- Playback 다운로드 보안 패치(원점 이슈만 — `PlaybackDownloadService` 분리 같은 구조 개선은 별도)
+- `common_widgets.cpp`의 mojibake 수정
+- `CredentialStore` 원자적 저장 전환(두 키 부분 실패 문제 해결)
+- 확실한 죽은 코드 삭제: `cgi_mock.cpp`(+ mock host CMake 타깃), `screens.cpp`/`screens.h`
+- UGV: **완전 삭제 안 함** — 비활성화 유지 결정을 최종 확정(문서화). 실제로 지금 이 프로젝트 환경(ONVIF 목업만 존재)에서는 `type=="UGV"`인 장치가 나올 방법이 없어서 UGV 화면 자체에 진입할 경로가 없다 — 사용자에게 안 보이는, 조용히 잠든 코드라 급하게 정리할 이유가 없음. 완전 삭제는 위험(라우팅/사이드바/설정 여러 곳 관통) 대비 지금 당장의 효용이 낮다고 판단.
+- Clean build 검증 (Debug 기준, 서버 설정 있음/없음 둘 다)
+
+**이번 라운드에서 안 한다 (명시적 보류)**:
+- ONVIF `VideoSourceToken` 분리 구현 — 위 사유로 계속 보류, 문서화만
+- 자동 테스트(소규모라도) — 사용자에게 별도로 물어볼 사항, 아직 결정 안 됨
+- `AppState` 전체 분해, 대형 파일(`main_screen.cpp`/`common_widgets.cpp`/`stream_player.cpp`/`login_screen.cpp`) 전체 분할, `PlaybackDownloadService` 같은 구조 분리 — 테스트 하네스 없이 대규모 구조 변경은 위험 대비 효용이 낮음. 이번 라운드는 "정확성·보안·죽은 코드"에 집중하고, 구조 개선은 이후 라운드로.
+- `credential_store.cpp`의 IP 대신 UUID 키 사용, QtKeychain 비동기 전환 — 이미 알려진 낮은 우선순위 항목, 계속 보류
+- README/`core_classes.md`/아키텍처 다이어그램/발표자료 갱신 — 코드 쪽 정리가 끝난 뒤 별도로 진행
+
+### 대상
+
+- `src/screens/playback_screen_export.cpp` — 다운로드 URL이 API 서버와 같은 origin일 때만 Bearer 토큰 첨부, 서버 제공 파일명 정규화, redirect는 자동 추종하지 않고 실패 처리
+- `src/ui/common_widgets.cpp` — mojibake 4곳 수정
+- `include/services/credential_store.h`/`.cpp` — username+password를 하나의 직렬화된 레코드로 저장(키 하나)하도록 변경
+- `mock_camera_host/cgi_mock.cpp` 삭제 + `mock_camera_host/CMakeLists.txt`에서 타깃 제거
+- `src/core/screens.cpp`, `include/core/screens.h` 삭제
+- `docs/core_classes.md`에 UGV 최종 결정 기록(다음 라운드 문서 작업에 포함)
+
+### 작업
+
+1. `credential_store.cpp` — 단일 키 JSON 레코드로 전환, 빌드 확인
+2. `common_widgets.cpp` — mojibake 4곳을 문맥에 맞는 정상 한글로 교체
+3. `playback_screen_export.cpp` — 파일명 정규화 헬퍼(`QFileInfo::fileName()` 기반) + origin 비교 헬퍼 추가, Bearer 첨부를 origin 일치 조건으로 감싸기, `ManualRedirectsPolicy` 설정 + HTTP status 2xx 체크로 redirect/실패 응답을 성공으로 오인하지 않게 수정
+4. `cgi_mock.cpp`/`screens.cpp`/`screens.h` 삭제, `mock_camera_host/CMakeLists.txt` 갱신
+5. 빌드 확인(메인 앱 + mock host 둘 다) + 사용자 게이트 테스트
+
+### 완료 기준 / 게이트 테스트
+
+- [x] 빌드 성공 (`VMS_v2`, `mock_camera_host` 둘 다 exit code 0, 링크까지 확인)
+- [x] (스킵 확정) Playback 다운로드: 서버 설정이 있는 경우 여전히 정상 다운로드되는지(회귀 없음) — 실서버가 없어 이 환경에서는 영구적으로 런타임 검증이 불가능. 코드 정확성(origin 체크, 파일명 정규화, redirect/HTTP status 처리)만 리뷰로 확인 완료, 런타임 검증은 서버 연동 시점으로 미룸(계속 대기 상태로 남겨두지 않고 스킵으로 확정)
+- [ ] `common_widgets.cpp`의 Playback 사이드바 문구 확인 — 게스트 모드에서 "PlaybackService unavailable"(영문 placeholder)이 그대로 노출되던 걸 지피티 리뷰로 재발견(2026-09-20), `"로그인이 필요한 기능입니다"`로 교체 완료. 사용자 게이트 테스트 대기
+- [ ] 자격증명 모달 정상 입력 → RTSP/PTZ 정상 동작 회귀 확인(Phase 3b 동작 유지, `CredentialStore` 저장 스킴 변경했으므로 로그인 상태로 자격증명 저장 자체는 여전히 서버 없어 테스트 불가 — 세션 캐시 경로만 확인 가능). 사용자 게이트 테스트 대기
+- [x] mock_camera_host에서 `cgi_mock` 타깃이 빠져도 나머지(`event_broadcaster`/`onvif_mock`) 정상 빌드 확인 완료
+- [ ] 게스트/서버 설정 없음 상태에서 기존 기능(장치 탐색, RTSP, PTZ, 로컬 이벤트) 전부 회귀 없는지. 사용자 게이트 테스트 대기
+
+### 게이트 테스트 중 추가로 발견/수정한 버그 (2026-09-19)
+
+사용자가 위 항목들을 테스트하다가 계획에 없던 버그를 하나 발견했다: **알림센터/이벤트 검색에는 LINE_CROSSING 이벤트만 보이고 MOTION_DETECTED/MOTION_CLEARED는 안 보임.** 대시보드 인라인 이벤트뷰에는 셋 다 정상 표시됨.
+
+**원인**: `EventUiHelpers::currentEvents()`(`event_ui_helpers.cpp:337`)가 선택된 CCTV 채널과 `channelId`/표시명이 정확히 일치하는 이벤트만 통과시키는 필터를 갖고 있었다(팀 프로젝트 때부터 있던 코드) — 서버가 등록한 디바이스 목록 중 "지금 보고 있는 채널"만 걸러 보여주려는 의도였을 것. 대시보드 인라인 이벤트뷰는 이 필터를 거치지 않고 `EventService::eventsUpdated` 신호의 원시 배열을 바로 쓰기 때문에 이 버그의 영향을 안 받고 있었다.
+
+Phase 4에서 카메라가 UDP로 직접 쏘는 로컬 이벤트를 받기 시작하면서 이 필터가 문제가 됐다 — 카메라(목업)가 자체적으로 붙이는 `channelId`/`channelName`(`event_broadcaster.cpp`의 하드코딩된 1/2, "cam1"/"cam2")과 ONVIF discovery가 VMS 쪽에서 독자적으로 매기는 `channelId`/`displayName`은 근본적으로 다른 번호 체계라 서로 안 맞을 수 있다. 실제로 LINE_CROSSING(channelId=2)은 우연히 선택된 채널의 ONVIF channelId와 맞아떨어져서 통과했고, MOTION 이벤트(channelId=1)는 안 맞아서 조용히 걸러지고 있었다.
+
+**수정**: `currentEvents()`의 채널 매칭 필터를 제거하고, 텔레메트리 이벤트만 걸러낸 뒤 나머지는 전부 통과시키도록 단순화 — 대시보드가 이미 하고 있던 "전부 보여주기" 동작으로 세 화면(대시보드/이벤트 검색/알림센터)을 통일했다. 채널 표시 이름 자체는 기존 `shortChannelName`/`detailedChannelName`의 매칭·폴백 로직을 그대로 써서, 선택 채널과 매칭 안 되는 이벤트도 "Channel N"/원본 이름으로 자연스럽게 표시된다. 서버 다중 디바이스 환경에서 "선택 안 한 채널 이벤트도 보임"이 된다는 트레이드오프가 있지만, 보안/관제 앱에서는 놓치는 것보다 다 보여주는 쪽이 더 안전한 기본값이라고 판단했다.
+
+이어서 사용자가 이벤트 검색 다이얼로그의 "이벤트 종류" 드롭다운이 8개나 되는데 절반(이상 온도 감지/카메라 가림 감지/충격 감지/움직임 감지)은 골라도 항상 결과가 0개라는 것도 확인 — `openEventSearchDialog()`가 팀 프로젝트의 고정 taxonomy 4종을 실제로 들어온 이벤트와 무관하게 항상 옵션에 끼워 넣고 있었다(`event_ui_helpers.cpp`). 목업이 그 타입들을 아예 안 만들어서 죽은 옵션으로 계속 남아있던 것 — 고정 목록을 제거하고 실제로 `currentEvents()`에 존재하는 타입만 적응형으로 채우도록 수정. 서버가 붙어 그 타입의 진짜 이벤트가 오면 자동으로 다시 나타난다.
+
+### Phase 6 마무리 라운드 — 지피티 리뷰 반영 (2026-09-19)
+
+Phase 6을 닫기 전에 지피티에게도 검토를 받았다. 코덱스 때처럼 주장을 코드로 직접 확인했고, 대부분 맞았다 — 특히 하나는 이번 세션에서 놓치고 있던 진짜 중요한 발견이었다. 사용자와 상의해서 실서버 없이도 지금 고칠 수 있는 정확성 문제 3개만 먼저 처리하고, 문서 정리는 마지막 라운드로 미루기로 결정.
+
+**1. `VMS_v1` 레거시 장치 관리 완전 제거** — 가장 중요한 발견. 설정 화면의 "장치 관리" 탭은 Phase 3b 안정화 패치 때 이미 비활성화해뒀는데, **탭이 비활성화되어도 그 밑에 깔린 `QSettings("TeamClue","VMS_v1")` 데이터는 여전히 런타임에서 쓰이고 있었다**:
+- `SidebarWidget::populateChannelTree()`(`common_widgets.cpp`)가 ONVIF로 찾은 채널 트리를 그린 뒤, 레거시 QSettings 장치를 "사용자 커스텀 장치"라는 이름으로 사이드바에 추가로 주입
+- `rtspUrlForDisplayName()`(`channel_context_dnd_helpers.cpp`)이 런타임(ONVIF) 매핑에 없으면 이 QSettings로 폴백 — 이 함수는 `ChannelSessionManager`/`CctvScreen`/`MainScreen`이 실제로 쓰는 핵심 RTSP 조회 경로
+- 편집 UI는 잠겨있는데 데이터 소스는 계속 살아있는, 죽은 코드도 정식 기능도 아닌 애매한 상태였다.
+
+지금 프로젝트 방향(ONVIF 선택 결과만 신뢰)과 맞지 않아 **제거**하기로 결정 — 설정 화면의 "장치 관리" 탭 자체를 삭제(저장 경로/정책 탭은 유지), 사이드바 주입 로직과 RTSP 폴백 로직 제거, 호출자가 전혀 없던 `rtspUrlForChannel()`도 같이 삭제. `SettingsDialog::devicesChanged()`와 그걸 트리거로 쓰던 `MainWindow::applyDeviceChangesToRuntimeState()`(이제 유일한 호출부가 없어짐)도 같이 정리 — `pruneStateDeviceSelection()`은 `initializeState()`에서도 쓰여서 남겨둠.
+
+**2. 이벤트 dedup의 eventId/fallback 키 교차 문제 수정** — 이전에 "로컬/서버 이벤트 중복 가능성"이라고 뭉뚱그려 적어뒀던 것을, 지피티가 훨씬 정확하게 짚었다: `dedupeKey(eventId, event)`가 eventId 있으면 그것만, 없으면 fallback 조합 키만 쓰는 구조라서, **같은 물리적 이벤트가 로컬(eventId 없음)과 서버 relay(eventId 있음)로 각각 들어오면 서로 다른 키 공간이라 dedup이 원천적으로 안 걸렸다.** `m_eventIdByFallbackKey`가 이미 있었지만 캐시 트림 복구용으로만 쓰이고 실제 중복 체크에는 전혀 반영이 안 되고 있었다. 실서버 없이도 코드 리뷰만으로 확인·수정 가능한 순수 로직 버그라 지금 고쳤다:
+- `EventService::tryInsertEvent(event, eventId, prepend)` 하나로 `ingestEventObject`(단건)/`mergeEventArray`(배치)의 중복된 삽입 로직을 통합
+- fallback 키와 id 키를 항상 둘 다 계산해서 어느 한쪽이라도 이미 봤으면 중복 처리, accept 시 둘 다 `m_seenKeys`에 기록
+- 두 키가 문자열로 우연히 겹치는 걸 막기 위해 `fp:`/`id:` 프리픽스 추가
+- `trimCache()`의 캐시 트림 후 키 재구성 로직도 같은 스킴으로 맞춤
+
+**3. `CredentialStore::load()` 필드 타입 검증 추가** — `{"username":1,"password":false}` 같은 손상된 JSON 레코드도 필드 존재 여부만 보고 통과시키던 문제. `QJsonValue::isString()` + 빈 문자열 체크를 추가해서 실제로 유효한 문자열 자격증명만 통과하도록 수정.
+
+**하기로 했지만 안 한 것(지피티가 다시 제기했지만 기존 결정 유지)**: 저장된 자격증명의 첫 사용 시 재검증(캐시/키체인 히트는 ping 안 함), `CredentialStore` 구버전 두 키 마이그레이션(로그인 상태로 저장된 적이 실제로 없어 마이그레이션할 데이터 자체가 없음), ONVIF `VideoSourceToken` — 전부 실카메라/실서버 없이는 의미 있게 검증할 수 없어서 계속 "알려진 제약"으로만 문서화. `LocalEventListener`가 UDP sender IP를 버리고 있다는 지적(향후 채널 식별 개선에 쓸 수 있음)도 지금 막 "채널 매칭 실패해도 다 보여주기"로 바꾼 방향과 반대라 지금은 안 함 — 아이디어로만 기록.
+
+**Phase 6 완료 조건으로 잡지 않기로 재확인한 것**: `AppState` 전체 분해, 대형 파일 전면 분할, `PlaybackDownloadService` 분리, 계층을 강제하는 CMake target 분리, 자동 테스트 도입 — 전부 이번 Phase 6 스코프 밖으로 재확인.
+
+빌드 확인 완료(`VMS_v2`, exit code 0). 이 라운드 이후 남은 건 문서 정리(README/`core_classes.md`/아키텍처 다이어그램, 안 쓰는 팀 프로젝트 문서 삭제)뿐 — 다음 라운드에서 진행.
+
+### Phase 6 문서 정리 라운드 (2026-09-19)
+
+위 3개 수정을 빌드 확인까지 마친 뒤, 사용자 지시대로 문서 정리를 진행(README는 사진 포함해서 사용자가 마지막에 직접 정리하기로 해서 제외):
+
+- **`docs/` 팀 프로젝트 잔재 삭제**: `VMS_v2_dev_execution_plan.md`/`VMS_v2_implementation_history.md`/`VMS_v2_performance_tracking.md`/`VMS_v2_phase1_8_implementation_history.md`/`VMS_v2_post_phase8_execution_plan.md`/`code_review_stabilization_plan.md`(이번 지피티 리뷰 원본, 내용은 위 섹션에 반영 완료), API 설계 CSV 4개, `docs/subfiles/` 전체(팀 프로젝트 아키텍처/코어클래스/로드맵/의사결정 문서 등 9개 파일) 삭제. 이 리포는 팀 프로젝트를 그대로 복사해와서 시작했기 때문에 한 번도 갱신 안 된 팀 문서가 많이 남아있었음 — 최종적으로 `docs/`에는 `core_classes.md`/`dev_execution_plan.md`/`refactoring_improvements.md`/`roadmap.md` 4개만 남김.
+- **`docs/core_classes.md` 갱신**: `CLAUDE.md`의 "전체 재작성 금지, 바뀐 섹션만 부분 수정" 규칙대로 시작 시점(2026-09-03) 이후 한 번도 안 건드려서 쌓인 괴리를 이번에 한 번에 정리. 새 "0.1 이 리팩토링이 무엇을 바꿨는가" 섹션을 추가해서 (곧 삭제할) `subfiles/VMS_v2_architecture.md`의 5-레이어 다이어그램을 가져와 Infra 레이어를 "카메라 직접 통신(항상 동작)" vs "서버 의존(선택)"으로 나눠서 다시 그림. `DeviceService`/`EventService`/`CctvControlService`/`AuthService`/`SettingsDialog`/`AppState` 등 실제로 바뀐 섹션 갱신, `OnvifLiteClient`/`CredentialStore`/`LocalEventListener`/`DeviceCredentialDialog` 신규 클래스 섹션 추가, 삭제된 파일(`screens.h`, `subfiles/*`) 참조 제거.
+- **`CLAUDE.md` 참조 정리**: `docs/code_review_stabilization_plan.md`를 가리키던 "현재 상태" 섹션의 링크가 파일 삭제로 끊겨서, 파일명을 직접 가리키지 않고 이 문서(위 "Phase 6 마무리 라운드" 섹션)를 가리키게 수정.
+- 삭제 후 `grep`으로 소스/문서 전체에서 삭제된 9개 파일명 참조가 남아있는지 재확인 — 남은 4개 문서 안에서 삭제된 `code_review_stabilization_plan.md`를 여전히 파일명으로 직접 가리키는 서술이 몇 군데(`roadmap.md`/`dev_execution_plan.md` 자체) 있었음. 소스 코드 쪽엔 없었지만, 이 4개 문서는 계속 참고할 문서라 "삭제된 파일을 지금도 열어볼 수 있는 것처럼" 적힌 문장은 오해를 부를 수 있음 — 지피티 재검토(2026-09-20)로 다시 짚혀서 각 위치에 "해당 파일은 Phase 6 문서 정리 때 삭제됨" 주석을 추가.
+
+### Phase 6 문서 참조 재정리 (2026-09-20)
+
+지피티에게 Phase 6 마무리 상태를 다시 검토받았다. 코드/문서를 직접 확인해서 5개 주장 전부 사실로 확인, 다음을 처리:
+
+- `common_widgets.cpp`의 게스트 모드 Playback 사이드바 placeholder가 영문 `"PlaybackService unavailable"`로 그대로 남아있던 것을 `"로그인이 필요한 기능입니다"`로 교체(이전 라운드에서 로드맵에 "정리하겠다"고 적어놓고 실제로 빠뜨렸던 것).
+- 위 "완료 기준 / 게이트 테스트" 체크리스트가 텍스트 설명과 실제 체크박스 상태가 안 맞던 것(설명은 "완료"인데 체크박스는 `[ ]`)을 정리 — 실서버 없이는 영구히 검증 불가능한 항목은 스킵 확정으로 명시하고, 사용자 게이트 테스트가 아직 필요한 항목은 `[ ]`로 유지하되 어떤 부분이 이미 코드 수정 완료됐는지 명확히 구분.
+- `CMakeLists.txt`의 `install()`이 로컬의 실제 `app_config.json`(서버 주소가 들어있을 수 있음)을 배포 패키지에 그대로 넣던 것을 고쳐서, 항상 `app_config.example.json`을 `app_config.json`으로 이름 바꿔 설치하도록 변경 — 실제 설정은 `.gitignore`로 커밋은 막혀 있었지만 `install()` 경로는 별개라 놓치고 있었음.
+- `roadmap.md`/`dev_execution_plan.md` 안에 남아있던 `code_review_stabilization_plan.md`(삭제됨) 파일명 직접 참조에 "삭제됨" 주석 추가.
+- `core_classes.md`의 아키텍처 레이어 표현이 "0.1" 섹션(5-레이어: UI/Application/Infra/Media/State)과 기존 "1.1" 섹션("네 층": 조립/라우팅·화면/UI·서비스/통신·미디어)으로 서로 안 맞던 것 — 1.1절에 두 표현의 목적이 다르다는(0.1은 아키텍처 개요, 1.1은 코드 독해용 mental model이라 `AppState`를 `MainWindow`와 묶어서 봄) 설명을 짧게 추가해서 해소.
+
+이벤트 dedup의 경계 조건 하나(로컬 이벤트가 먼저 도착해서 fallback 키만 등록된 뒤, 같은 물리 이벤트의 서버판이 eventId를 달고 나중에 들어오면 중복으로 거부는 되지만 `id:` 키가 `m_seenKeys`에 등록되지 않는 문제 — 이후 같은 eventId가 timestamp/채널명이 살짝 다른 형태로 재전송되면 dedup을 빠져나갈 여지가 있음)도 코드로 확인했으나, 발생 조건이 좁아 차단 필수는 아니라고 판단해 지금은 알려진 제약으로만 기록.
+
+### 게이트 테스트 중 발견한 추가 버그 — Playback 게스트 placeholder가 로그인이 아니라 서버 설정 여부로 갈리고 있었음 (2026-09-20)
+
+사용자가 위 "로그인이 필요한 기능입니다" 문구 수정을 게스트로 실제 테스트하다가, 문구가 아예 안 뜨고 대신 "녹화 없음" → 클릭 시 "타임라인 조회 중..." → "타임라인 조회 실패: 오퍼레이션 캔슬드"가 뜨는 걸 발견했다.
+
+**원인**: `SidebarWidget::reloadPlaybackTree()`의 게이트 조건이 `!m_playbackService`뿐이었는데, `m_playbackService`는 `MainWindow::initializeAuthServices()`(`mainwindow_auth.cpp:592` 이후)에서 **로그인 여부가 아니라 `apiBaseUrl` 설정 유무**로만 생성된다. 이 개발 머신의 로컬 `app_config.json`에 예전 팀 서버 주소(`http://192.168.0.51:8080`)가 `apiBaseUrl`로 그대로 남아있어서, 게스트로 들어가도 `m_playbackService`는 null이 아니게 만들어지고 있었다 — Phase 3b 안정화 패치 4.1과 완전히 같은 클래스의 문제("개발 머신에 남은 서버 설정이 실제 동작을 가린다")가 여기서도 재현된 것. 그래서 게이트를 통과해 죽은 서버로 실제 조회를 시도하다가 취소되어 위 에러가 났다.
+
+**수정**: 게이트 조건에 `!AppState::instance().isAuthenticated`를 추가(`common_widgets.cpp`) — 서버 설정 존재 여부가 아니라 실제 로그인 상태를 봐야 "로그인이 필요한 기능입니다" 문구의 의미와 맞는다. 화면은 로그인/게스트/로그아웃 전환마다 `MainWindow`가 다시 만들고 `setPlaybackService(...)`를 다시 호출하므로(`mainwindow_runtime.cpp`), 상태가 바뀔 때마다 이 체크도 다시 평가된다. 빌드 확인 완료.
+
+**후속 — 영상 영역에도 같은 안내 추가 (2026-09-20)**: 사용자가 스크린샷으로 확인한 뒤, "사이드바 문구만으로 충분한지, 영상 재생 영역(빈 검은 화면)에도 표시하는 게 나을지" 의견을 물어서 논의했다. 모달은 사용자 본인이 이미 싫어하는 패턴이라 배제, 대신 `PlaybackScreen`에 정확히 이 용도로 쓰라고 만들어져 있던 `m_playbackFileLabel`(영상 영역 위 헤더 바, QSS `#playbackFileLabel` 스타일까지 준비돼 있었음)을 재사용하기로 했다.
+
+조사해보니 이 라벨은 **원래도 화면에 전혀 안 보이던 죽은 위젯**이었다 — 생성은 되지만(`playback_screen.cpp:173`) `contentLayout`에 한 번도 `addWidget`되지 않았고, `hide()`로 시작한 뒤 `show()`를 호출하는 곳도 없었다. 타임라인 로드/재생 시작 시 `setText(...)`를 호출하는 기존 코드(`playback_screen_timeline.cpp:158, 224`)도 그래서 지금까지 실제로는 아무 효과가 없었다 — 로그인 여부와 무관한, 이번에 처음 발견한 별개의 기존 버그.
+
+- `contentLayout->addWidget(m_playbackFileLabel);`을 `m_videoHost` 앞에 추가해서 실제로 레이아웃에 들어가게 함(`hide()` 호출도 제거 — 항상 보이는 상태 바로 취급)
+- `PlaybackScreen::setPlaybackService(...)`에서 `SidebarWidget::reloadPlaybackTree()`와 같은 조건(`!service || !AppState::instance().isAuthenticated`)으로 라벨 문구를 "로그인이 필요한 기능입니다" ↔ 기본 문구("트리에서 재생할 항목을 선택하세요.")로 전환
+- 부수 효과: 기존에 죽어있던 "[채널] 날짜 타임라인 로드됨"/"[채널] 파일명" 표시도 이제 실제로 화면에 보이게 됨
+
+빌드 확인 완료.
+
+### Phase 6 코덱스 전체 검토 반영 (2026-09-20)
+
+"Phase 6 끝내고 README 써도 되는지" 사용자 질문에 코덱스가 프로젝트 전체를 다시 검토했다. 코덱스 주장 전부를 코드로 직접 확인(항상 해온 대로), 대부분 맞았고 하나(`.gitignore` 하단에 "깨진 Phase 0 주석"이 있다는 주장)는 실제로 읽어보니 틀렸다 — 96~103행은 정상적인 한글 주석이라 이 항목은 반영하지 않았다.
+
+**1. Playback placeholder 우회 버그 — 코덱스 설명보다 실제로 더 심각했음.** 코드를 직접 따라가보니: `"로그인이 필요한 기능입니다"` 트리 항목은 자식이 없는 일반 leaf라서 더블클릭 가드(`childCount() > 0`)를 통과하고, `channel` 값이 `item->data(UserRole+2)`(비어있음) → `item->text(0)`으로 폴백하면서 **안내 문구 자체가 채널명으로 둔갑**한다. `channelId`도 무효값이 `.toInt()`로 `0`이 되어 "빈 값"이 아니게 취급되고, 결국 `PlaybackScreen::showEvent()`가 `startPlaybackForChannel(0, "로그인이 필요한 기능입니다", 오늘날짜)`를 실제로 호출한다. `loadTimelineForChannel()`의 가드는 `!m_playbackService`뿐이라 `isAuthenticated`를 안 보기 때문에, 로컬에 죽은 서버 주소가 남아있는 흔한 상황(바로 위 절에서 겪은 것과 같은 패턴)이면 **실제 네트워크 요청이 나간다.** 즉 화면에 띄운 안내 문구는 눈속임일 뿐 실제 접근 차단이 전혀 아니었다.
+
+수정(코덱스가 제안한 두 겹 방어 그대로 적용):
+- `common_widgets.cpp`의 Playback 트리 상태 항목 5곳("로그인이 필요한 기능입니다" 1곳, "녹화 없음" 3곳, "조회 실패" 1곳) 전부에 `setFlags(flags() & ~(Qt::ItemIsSelectable | Qt::ItemIsDragEnabled))`를 추가해서 선택/더블클릭 자체가 안 되게 함
+- `PlaybackScreen::loadTimelineForChannel()`(`playback_screen_timeline.cpp`)의 가드에 `!AppState::instance().isAuthenticated`를 추가 — 트리 우회든 다른 경로든 상관없이 로그인 안 한 상태에서는 실제 서비스 호출이 나가지 않도록 하는 최종 방어선
+
+**2. 죽은 코드 제거 — grep으로 전부 재확인, 하나는 새 mojibake까지 딸려 있었음.**
+- `EventCardWidget`/`ElidedLabel`(`common_widgets.cpp`): 정의 외 참조 0건, 삭제
+- `buildEventCardPreview()`/`eventCardPreviewPath()`/`sanitizeCardToken()`(`common_widgets.cpp`): 서로만 참조하는 고립된 함수 체인, 삭제. `buildEventCardPreview()`는 `return {};` 뒤에 도달 불가능한 코드가 있었는데 그 안에 지난 mojibake 정리 라운드에서 놓친 새 mojibake(`"[?ъ쭊 16:9]"`, 16:9 placeholder 텍스트가 깨진 것)가 있었다 — 죽은 코드라 통째로 삭제하면서 같이 없어짐
+- `detailedEventTypeLabel()`/`findDesktopEventPreviewPath()`/`sanitizeFileToken()`(`event_ui_helpers.cpp`): 마찬가지로 참조 0건, 삭제
+- `MainWindow::rebuildRuntimeScreens()`(`mainwindow_runtime.cpp` + `mainwindow.h`): Phase 6에서 `SettingsDialog::devicesChanged()` 트리거를 없애면서 유일한 호출 경로가 사라져 고아가 된 것, 삭제
+- 위 삭제로 더 이상 안 쓰이게 된 include 정리: `common_widgets.cpp`에서 `QFileInfo`/`QMouseEvent`/`QPainter`/`QStandardPaths`/`QDir`, `event_ui_helpers.cpp`에서 `QDir`/`QFileInfo`/`QStandardPaths`
+
+**3. 빌드 디렉터리 클린 상태 확인.**
+- `mock_camera_host/build/`에 삭제된 `cgi_mock` 타깃의 잔재(`cgi_mock.exe`/`.ilk`/`.pdb`/autogen)가 그대로 남아있던 것 확인 — 디렉터리 자체를 지우고 새로 configure+build해서 `event_broadcaster`/`onvif_mock` 두 타깃만 깨끗하게 남도록 정리
+- `VMS_v2`도 완전히 새 디렉터리(`build_clean_verify`)에서 configure부터 새로 해서 60개 컴파일 유닛 전부(qt6keychain 서브빌드 포함) 빌드+링크 성공 확인 — 코덱스가 자기 환경에서 "Re-checking globbed directories..."에서 안 넘어가서 독립적인 빌드 성공으로 판정 못 했다고 한 부분은, 이 세션에서는 매번 문제없이 끝까지 진행됨(3b 안정화 패치 때도 같은 결론 — 코덱스 환경의 MSVC 설정 문제로 추정, 프로젝트 결함 아님). 검증용 디렉터리는 확인 후 삭제
+
+**4. 문서 동기화.**
+- `CLAUDE.md`의 TODO 3개(빌드 명령, Qt/C++ 버전, 카메라 클래스 배치 위치)를 실제 값으로 채움
+- `CLAUDE.md` Phase 3b 안정화 패치 항목의 "장치 관리 탭 비활성화" 서술에 이후 Phase 6에서 탭이 완전히 삭제됐다는 포워드 참조 추가
+- `refactoring_improvements.md`의 "발표자료" 잔여 언급을 스킵 확정 사유와 함께 정리, `"PlaybackService unavailable"` 영문 placeholder를 아직 "고쳐야 할 것"처럼 서술하던 문단을 과거형으로 갱신하고 이번에 찾은 더블클릭 우회 버그 수정 내용도 반영
+
+빌드 확인 완료(새 빌드 디렉터리 clean build 포함). 남은 건 사용자 게스트 통합 테스트와 README뿐.

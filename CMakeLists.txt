@@ -136,10 +136,12 @@ install(TARGETS VMS_v2
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/app_config.json")
-    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/app_config.json"
-        DESTINATION ${CMAKE_INSTALL_BINDIR})
-endif()
+# 배포 패키지(cmake --install)에는 실제 app_config.json(개발자 로컬 서버 주소가 들어있을 수 있음)을
+# 절대 넣지 않는다 — .gitignore로 커밋은 막아뒀지만 install()은 별개 경로라 여기서도 막아야 함.
+# 항상 app_config.example.json을 app_config.json으로 이름 바꿔서 설치(서버 주소가 빈 안전한 기본값).
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/app_config.example.json"
+    DESTINATION ${CMAKE_INSTALL_BINDIR}
+    RENAME app_config.json)
 
 if(QT_VERSION_MAJOR EQUAL 6)
     qt_finalize_executable(VMS_v2)

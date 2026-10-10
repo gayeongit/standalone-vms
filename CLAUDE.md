@@ -33,17 +33,24 @@
 
 ## 빌드 / 실행
 
+Windows + MSVC(Visual Studio 2022) + Qt 6.8.3(msvc2022_64) 기준. `vcvars64.bat`로 MSVC 환경을 먼저 로드해야 `cmake --build`가 컴파일러를 찾는다.
+
 ```bash
-# TODO(사용자 확인 필요): 실제 빌드 명령어로 교체
+# 메인 앱(VMS_v2)
+"C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"
 cmake -B build
-cmake --build build
+cmake --build build --target VMS_v2
+
+# 목업 카메라 호스트(별도 CMake 프로젝트)
+cmake -S mock_camera_host -B mock_camera_host/build -DCMAKE_PREFIX_PATH=C:/Qt/6.8.3/msvc2022_64
+cmake --build mock_camera_host/build
 ```
 
 ## 코드 컨벤션
 
 - 기존 v2 코드 스타일 따름
-- Qt 6, C++17 이상 (TODO: 실제 `CMakeLists.txt` 기준으로 확정 필요)
-- 신규 카메라 통신 관련 클래스 배치 위치: TODO(확인 필요) — `camera/` 신설 or 기존 `services/` 재사용
+- Qt 6(`find_package(QT NAMES Qt6 Qt5 ...)`이지만 실제로는 Qt6로 빌드), C++17(`CMakeLists.txt`의 `CMAKE_CXX_STANDARD 17`)
+- 신규 카메라 통신 관련 클래스는 `camera/`를 새로 만들지 않고 기존 `services/`에 둔다 — Phase 1~4에서 실제로 `OnvifLiteClient`/`CredentialStore`/`LocalEventListener`가 전부 `services/`에 들어갔고, 카메라 프로토콜 클래스가 이 3개뿐이라 별도 디렉토리로 분리할 만큼 쌓이지 않았음(Phase 6 재확인, 앞으로도 유지)
 
 ## 문서 갱신 규칙
 
@@ -58,8 +65,10 @@ cmake --build build
 - Phase 1(카메라 자동 탐색, ONVIF-lite Discovery) 완료 (2026-09-08) — `OnvifLiteClient` 신설, `DeviceService`가 `device.source`(기본 `"onvif"`)로 서버/목업 분기, `DeviceCheckScreen`/`mainwindow_auth.cpp`의 `startRequested` 핸들러는 무수정. 목업 호스트 대상 DeviceCheck→Main 재생 확인 완료. 세부 내용은 `docs/dev_execution_plan.md` Phase 1 섹션 참고
 - Phase 2(CctvControlService 직접 제어 전환) 완료 (2026-09-09) — 계획했던 GET+query-param CGI 방식을 재검토해서 **ONVIF PTZ(`RelativeMove`)/Imaging(`Move`) SOAP**으로 변경(벤더별로 다른 CGI보다 표준 프로토콜이 낫다고 판단, Phase 1의 `OnvifLiteClient` 재사용). `cgi_mock.cpp`는 이번엔 안 씀. `CctvScreen`/`zoomStep`/`focusStep` 시그니처는 무수정. 세부 내용은 `docs/dev_execution_plan.md` Phase 2 섹션 참고
 - Phase 3b(로컬 자격증명 캐시) 완료 (2026-09-16) — discovery/트리 조회는 무인증 유지, RTSP 재생/PTZ 제어에만 ID/PW 요구. 디바이스별 모달(`DeviceCredentialDialog`) + `CredentialStore`(QtKeychain, CMake `FetchContent`로 도입) 신설, 게스트=세션 휘발성/회원=영구 저장. `onvif_mock`/`mediamtx`가 실제로 인증을 거부하게 구현. 틀린 자격증명 입력 시 UX 보정(대표 채널 PTZ ping으로 즉시 검증 → 실패하면 기존 "RTSP 조회 실패" 채널과 동일하게 그리드에서 제외, `main_screen.cpp` 무수정)까지 반영. 로그인 상태의 QtKeychain 영구 저장 테스트는 인증 서버가 없어 검증 불가 + 프로젝트 목적(서버 없이 동작)상 우선순위가 아니라 의도적으로 스킵. 세부 내용은 `docs/dev_execution_plan.md` Phase 3b 섹션 참고
-- Phase 3b 안정화 패치 완료 (2026-09-17) — 코드 리뷰(`docs/code_review_stabilization_plan.md`) 결과 중 Phase 4 진입 전 필요한 항목 처리. 가장 중요한 건: `apiBaseUrl` 없으면 `DeviceService`/`OnvifLiteClient`/`CctvControlService` 자체가 생성되지 않던 버그를 고쳐서, 서버 설정이 전혀 없어도 게스트 ONVIF 경로가 항상 동작하게 함(그동안은 개발 머신에 남아있던 서버 설정 파일이 이 문제를 가려왔음). WS-Security `Created` 중복 `Z`/XML escape 누락, 코덱 캐시 미정리, `DeviceCheckScreen::reloadDevices()`의 `QSharedPointer<std::function>` 순환 참조 등도 정리. "장치 관리" 탭(런타임과 분리된 no-op)은 UGV와 동일하게 비활성화. Qt Test 자동화 도입(리뷰 4.3)과 ONVIF 파싱 전면 교체(`QXmlStreamReader`)/PTZ·Imaging 토큰 분리는 스코프 밖으로 명시적으로 미룸. 게이트 테스트 중 자격증명 모달 취소 버그, 로그인 화면 상태 유지 버그 등 4건 추가 발견/수정. 세부 내용은 `docs/dev_execution_plan.md`의 "Phase 3b 안정화 패치" 섹션 참고
+- Phase 3b 안정화 패치 완료 (2026-09-17) — 코드 리뷰 결과 중 Phase 4 진입 전 필요한 항목 처리(리뷰 원본 문서는 Phase 6 문서 정리 때 삭제, 내용은 `docs/dev_execution_plan.md`에 반영됨). 가장 중요한 건: `apiBaseUrl` 없으면 `DeviceService`/`OnvifLiteClient`/`CctvControlService` 자체가 생성되지 않던 버그를 고쳐서, 서버 설정이 전혀 없어도 게스트 ONVIF 경로가 항상 동작하게 함(그동안은 개발 머신에 남아있던 서버 설정 파일이 이 문제를 가려왔음). WS-Security `Created` 중복 `Z`/XML escape 누락, 코덱 캐시 미정리, `DeviceCheckScreen::reloadDevices()`의 `QSharedPointer<std::function>` 순환 참조 등도 정리. "장치 관리" 탭(런타임과 분리된 no-op)은 UGV와 동일하게 비활성화(이후 Phase 6에서 탭 자체를 완전히 삭제로 재정리됨, 아래 참고). Qt Test 자동화 도입(리뷰 4.3)과 ONVIF 파싱 전면 교체(`QXmlStreamReader`)/PTZ·Imaging 토큰 분리는 스코프 밖으로 명시적으로 미룸. 게이트 테스트 중 자격증명 모달 취소 버그, 로그인 화면 상태 유지 버그 등 4건 추가 발견/수정. 세부 내용은 `docs/dev_execution_plan.md`의 "Phase 3b 안정화 패치" 섹션 참고
 - Phase 4(이벤트 직접 수신 경로) 완료 (2026-09-17) — 신규 `LocalEventListener`(QUdpSocket)가 목업 호스트의 UDP broadcast 이벤트를 서버 없이 직접 수신, `EventService::ingestLocalEvent(...)`(기존 `ingestEventObject` 재사용)로 정규화해서 WS/REST와 같은 dedup 캐시를 공유. 조사 중 `EventService` 자체가 서버 설정 게이트 뒤에서만 생성되던 버그(3b 안정화 패치의 4.1과 같은 종류)를 발견해 같이 고쳐서, 서버 없이도 이벤트 UI가 항상 동작하게 함. 화면 계층(`MainScreen`)은 무수정 — 기존에 있던 5초 디바운스+burst 안전장치가 그대로 로컬 이벤트에도 적용됨. 세부 내용은 `docs/dev_execution_plan.md` Phase 4 섹션 참고
-- 다음 작업: Phase 5(Playback, 선택) 또는 Phase 6(통합 검증). `docs/roadmap.md` 참고
+- Phase 5(Playback) 스킵 결정 (2026-09-17) — 원래부터 선택 사항이었고, 검토 중 나온 확장 아이디어(이벤트 상세→그 시점 영상 바로 보기, 이벤트 발생 시 스냅샷)가 둘 다 실제 녹화 아카이브(=서버)가 있어야 의미 있는 기능이라 판단. `CLAUDE.md` 설계 원칙 3("이벤트 히스토리는 로그인 부가 기능")이 이미 이 경계를 정해두고 있어서 서버 없이 동작이라는 이 프로젝트 핵심 스코프 밖으로 봄. 아이디어는 `docs/refactoring_improvements.md` 6절에 기록, 서버 연동 시점에 재검토
+- Phase 6(통합 검증 + 문서 정리) 거의 완료 (2026-09-20) — 코덱스/지피티 리뷰로 찾은 정확성 문제 3개(`VMS_v1` 레거시 장치 관리 완전 제거, 이벤트 dedup eventId/fallback 키 교차 버그 수정, `CredentialStore::load()` 필드 타입 검증) 처리, 문서 정리(팀 프로젝트 잔재 문서 삭제, `docs/core_classes.md` 갱신) 완료. 이어서 코덱스에게 한 번 더 전체 검토를 받아 실제 버그 하나(게스트 모드 Playback 사이드바의 "로그인이 필요한 기능입니다" 안내 항목이 선택 가능한 일반 트리 항목이라 더블클릭하면 실제로 `channelId=0`짜리 가짜 재생 요청이 나가던 것 — 상태 안내 항목 전부 `Qt::ItemIsSelectable` 제거 + `PlaybackScreen::loadTimelineForChannel()`에도 `isAuthenticated` 최종 가드 추가로 수정)과 죽은 코드(`EventCardWidget`/`ElidedLabel`/`buildEventCardPreview`+내부 mojibake/`detailedEventTypeLabel`/`findDesktopEventPreviewPath`/`MainWindow::rebuildRuntimeScreens()`) 다수를 추가로 찾아 처리, 새 빌드 디렉터리 기준 클린 빌드로 최종 확인. README만 사용자가 스크린샷과 함께 마지막에 직접 정리하기로 하고 제외. 세부 내용은 `docs/dev_execution_plan.md`의 "Phase 6 마무리 라운드"/"Phase 6 문서 정리 라운드"/"Phase 6 코덱스 전체 검토 반영" 섹션 참고
+- 다음 작업: 남은 게스트 통합 테스트(사용자 직접) → README 정리(사용자 직접) → 리팩토링 마무리. `docs/roadmap.md` 참고
 - 포트폴리오용 요약: `docs/refactoring_improvements.md` (왜 리팩토링했는지 + 무엇을 개선했는지, 세부 실행 로그와 별개로 성과 관점 정리)
 - RPi 하드웨어 대기 상태는 해제됨 (`docs/roadmap.md` 3.6절) — Phase 0/1/2/4/5 순서대로 진행 가능

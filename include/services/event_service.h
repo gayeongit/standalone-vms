@@ -49,13 +49,21 @@ private:
     void ingestEventObject(const QJsonObject &eventObject);
     void mergeEventArray(const QJsonArray &items, bool markUnread);
     void trimCache();
+    // Phase 6: ingestEventObject/mergeEventArray가 각자 따로 갖고 있던 dedup 체크+삽입 로직을
+    // 여기로 합쳤다 — eventId 키와 fallback(timestamp/channel/type 조합) 키를 항상 둘 다 계산해서
+    // 어느 한쪽이라도 이미 봤으면 중복으로 처리한다. 예전엔 eventId가 있으면 그것만 키로 써서,
+    // 로컬(eventId 없음, fallback 키)과 서버 relay(eventId 있음, id 키)로 같은 물리적 이벤트가
+    // 각각 다른 키로 들어오면 dedup이 안 걸리는 문제가 있었다. 성공 시 event를 m_events에 넣고
+    // true를 반환 — unread 카운트는 두 호출부의 배치/단건 처리 방식이 달라서 호출부가 직접 관리.
+    bool tryInsertEvent(const EventInfo &event, const QString &eventId, bool prepend);
 
     static QString stringValue(const QJsonValue &value);
     static QString extractEventId(const QJsonObject &object);
     static EventInfo buildEventInfo(const QJsonObject &object);
     static QJsonArray extractEventArray(const QJsonObject &root);
     static bool isLikelyEventObject(const QJsonObject &object);
-    static QString dedupeKey(const QString &eventId, const EventInfo &event);
+    static QString fallbackDedupeKey(const EventInfo &event);
+    static QString idDedupeKey(const QString &eventId);
     static bool isNewerEvent(const EventInfo &lhs, const EventInfo &rhs);
     static QString normalizedTimestampString(const QString &timestamp);
     static qint64 timestampSortKey(const QString &timestamp);

@@ -1,12 +1,53 @@
 # VMS v2 핵심 클래스/함수 상세 가이드
 
-- 최종 갱신: 2026-03-23
-- 기준: `VMS_v2` 현재 코드(`*.h`, `*.cpp`)와 최신 구조/운영 문서
-- 목적: 새 작업자가 이 문서 하나로 **구조, 런타임 흐름, 핵심 클래스, 주요 함수, 확장 시 주의점**을 따라갈 수 있도록 정리
-- 상태: **리팩토링(standalone-vms) 시작 시점 스냅샷.** 이 문서는 통째로 다시 쓰지 않는다. Phase 종료 후 실제로 바뀐 클래스에 해당하는 섹션만 부분 수정하고, 화면/미디어 계층처럼 설계 원칙상 건드리지 않는 섹션은 그대로 둔다. 이전 버전이 필요하면 `git log -p docs/core_classes.md`로 확인한다.
+- 최종 갱신: 2026-09-19 (Phase 0~6 리팩토링 반영)
+- 기준: `VMS_v2`(=`standalone-vms`) 현재 코드(`*.h`, `*.cpp`)
+- 목적: 이 문서 하나로 **구조, 런타임 흐름, 핵심 클래스, 주요 함수, 확장 시 주의점**을 따라갈 수 있도록 정리
+- 상태: 팀 프로젝트 [VEDA3-CLUE-VMS](https://github.com/gayeongit/VEDA3-CLUE-VMS)(`v2` 브랜치)를 서버 의존성 제거 방향으로 리팩토링한 스냅샷(2026-09-03~2026-09-19, Phase 0~6). 이 문서는 통째로 다시 쓰지 않는다. 앞으로도 실제로 바뀐 클래스에 해당하는 섹션만 부분 수정하고, 화면/미디어 계층처럼 설계 원칙상 건드리지 않는 섹션은 그대로 둔다. 이전 버전이 필요하면 `git log -p docs/core_classes.md`로 확인한다.
 
 > 이 문서는 "클래스 목록" 문서가 아니다.  
 > 실제 코드를 읽을 때 무엇부터 보고, 어떤 객체가 무엇을 소유하고, 어디서 상태가 바뀌는지를 설명하는 **코드 독해용 가이드**다.
+
+## 0.1 이 리팩토링이 무엇을 바꿨는가 (요약)
+
+원본(팀 프로젝트)은 로그인/장치조회/카메라제어/이벤트 수신이 전부 서버(REST+WS)를 거쳐야만 동작했다. 이 리팩토링은 **서버를 없애는 게 아니라 서버 의존성을 없애는 것**이 목표다 — 카메라(ONVIF-lite를 말하는 목업 호스트, 나중엔 실카메라로 교체 가능)와 VMS가 직접 통신해서 핵심 기능이 서버 없이도 동작하게 만들고, 서버는 그 위에 선택적으로 얹히는 부가 기능(계정, 자격증명 동기화, 이벤트 히스토리)으로 내렸다.
+
+```
+                          VMS_v2 (Qt/C++)
+┌───────────────────────────────────────────────────────────────┐
+│  UI Layer                                                      │
+│  LoginScreen│SignupScreen│DeviceCheckScreen│MainScreen│CctvScreen│
+│  UgvScreen│PlaybackScreen│SettingsDialog│DeviceCredentialDialog │
+│  TopbarWidget│SidebarWidget│EventViewWidget│PopupManager        │
+├───────────────────────────────────────────────────────────────┤
+│  Application Layer                                             │
+│  AuthService│DeviceService│CctvControlService│EventService      │
+│  PlaybackService│UgvService                                    │
+├───────────────────────────────────────────────────────────────┤
+│  Infra Layer                                                   │
+│  카메라 직접 통신(항상 동작, 서버 무관)                          │
+│    OnvifLiteClient │ LocalEventListener │ CredentialStore       │
+│  서버 의존(선택, apiBaseUrl 있을 때만)                           │
+│    RestClient │ WsClient                                        │
+├───────────────────────────────────────────────────────────────┤
+│  Media Layer                                                   │
+│  StreamPlayer│VideoRenderWidget│ChannelSessionManager│ClipCaptureManager │
+├───────────────────────────────────────────────────────────────┤
+│  State Layer                                                   │
+│  AppState (싱글턴)                                              │
+└───────────────────────────────────────────────────────────────┘
+        │ ONVIF-lite SOAP / UDP broadcast          │ REST / WS (선택)
+        ▼                                          ▼
+  카메라(목업 호스트, mock_camera_host/)          기존 서버(있으면 로그인 모드로 활성화)
+```
+
+핵심 변경 지점(Phase별 상세는 `docs/dev_execution_plan.md`, 성과 관점 요약은 `docs/refactoring_improvements.md` 참고):
+
+- **장치 탐색(Phase 1)**: `DeviceService`가 REST 대신 `OnvifLiteClient`로 WS-Discovery + `GetCapabilities`/`GetProfiles`/`GetStreamUri`를 직접 호출. `device.source` 설정(기본 `"onvif"`)으로 서버/ONVIF 분기 — **로그인 여부와 무관**하게 항상 ONVIF 경로를 탄다.
+- **카메라 제어(Phase 2)**: `CctvControlService`가 서버 REST 프록시 대신 ONVIF PTZ(`RelativeMove`)/Imaging(`Move`) SOAP을 `OnvifLiteClient`로 직접 호출.
+- **로컬 자격증명(Phase 3b)**: 카메라 RTSP 재생/PTZ 제어에만 ID/PW가 필요 — discovery는 계속 무인증. `DeviceCredentialDialog`(모달) + `CredentialStore`(QtKeychain 래퍼)가 담당. 게스트=세션 휘발성, 로그인=영구 저장.
+- **이벤트 직접 수신(Phase 4)**: `LocalEventListener`(UDP)가 카메라 broadcast를 직접 받아 `EventService`에 넣는다. 서버 WS/REST 이벤트와 같은 dedup 캐시를 공유 — 로그인하면 로컬 수신은 유지된 채로 서버 이벤트가 추가로 얹힌다.
+- **서버 없이도 카메라 서비스가 항상 뜨도록(Phase 3b 안정화 패치)**: `MainWindow::initializeAuthServices()`에서 `RestClient`/`OnvifLiteClient`/`DeviceService`/`CctvControlService`/`EventService`/`LocalEventListener`는 서버 설정(`app_config.json`) 유무와 무관하게 항상 생성된다. `AuthService`/`PlaybackService`/`UgvService`/`WsClient`만 서버 설정이 있을 때만 생성.
 
 ---
 
@@ -40,7 +81,7 @@
 
 ## 1.1 가장 중요한 mental model
 
-`VMS_v2`는 크게 네 층으로 본다.
+`VMS_v2`는 크게 네 층으로 본다(0.1절의 5-레이어 다이어그램과 이름이 다른데, 목적이 다르기 때문이다 — 0.1은 "리팩토링으로 무엇이 바뀌었는지" 보여주는 아키텍처 개요라 `AppState`를 독립된 State 층으로 뽑아서 그렸고, 여기 네 층은 "실제 코드를 읽을 때 쓰는 mental model"이라 `MainWindow`와 `AppState`를 조립/라우팅이라는 하나의 역할로 묶어서 본다. 클래스 목록은 동일하다).
 
 1. **조립/라우팅 층**
    - `MainWindow`
@@ -52,7 +93,8 @@
 
 3. **서비스/통신 층**
    - `AuthService`, `DeviceService`, `EventService`, `PlaybackService`, `CctvControlService`, `UgvService`
-   - `RestClient`, `WsClient`
+   - `RestClient`, `WsClient` — 서버 의존(선택)
+   - `OnvifLiteClient`, `CredentialStore`, `LocalEventListener` — 카메라 직접 통신(항상 동작), Phase 0~4에서 신설
 
 4. **미디어/세션 층**
    - `StreamPlayer`
@@ -197,7 +239,6 @@ DeviceCheck 첫 진입 시 300ms 딜레이를 두는 이유는, 로그인 직후
 
 현재 대표 분해:
 
-- `screens.h` -> umbrella header
 - `mainwindow.cpp`
 - `mainwindow_auth.cpp`
 - `mainwindow_runtime.cpp`
@@ -384,10 +425,13 @@ UI가 무엇을 표시할지, 세션 상태를 어떻게 갱신할지, stale mes
   - `gridCells[9]`
 - 장치/스트림 맵
   - `selectedChannelContexts`
-  - `channelRtspByName`
-  - `channelRtspById`
-  - `channelVideoCodecByName`
-  - `channelVideoCodecById`
+  - `channelRtspByName` / `channelRtspById`
+  - `channelVideoCodecByName` / `channelVideoCodecById`
+- ONVIF 주소/토큰 맵 (Phase 1~2 신설)
+  - `channelOnvifPtzXAddrById` / `channelOnvifImagingXAddrById` / `channelOnvifProfileTokenById`
+- 카메라 자격증명 (Phase 3b 신설)
+  - `deviceCredentialUsernameByIp` / `deviceCredentialPasswordByIp` — 세션 캐시, `deviceIp` 키(§8.4 참고 — `deviceId`는 불안정)
+  - `channelOnvifUsernameById` / `channelOnvifPasswordById` — 위 맵을 채널ID 기준으로 복제해둔 것(`CctvControlService`가 바로 읽기 위함)
 
 ### 핵심 메서드
 
@@ -436,18 +480,18 @@ UI가 무엇을 표시할지, 세션 상태를 어떻게 갱신할지, stale mes
 
 - 로그인/회원가입/장치확인 연결
 - 로그인 성공 후 토큰/서비스 주입
-- DeviceCheck 진입
+- 장치별 자격증명 모달(`DeviceCredentialDialog`) + ONVIF ping 검증 + `CredentialStore` 저장 흐름(Phase 3b)
+- DeviceCheck 진입 → `runDeviceSelectionPipeline(...)`로 RTSP/codec/ONVIF 주소 해석
 - 로그아웃/401 처리
 
-현재 주의:
-
-- `configureLoginScreenState()` 기본 오류 문구에 깨진 한글 문자열이 남아 있어 복구 대상이다.
+이 파일이 가장 크고(약 800줄) 인증뿐 아니라 카메라 도메인 조립까지 담당한다 — Phase 6에서 분리 후보로 남겨뒀지만 아직 진행 안 함(`docs/code_review_stabilization_plan.md` 참고 문서는 삭제됐으므로 세부 근거는 `docs/dev_execution_plan.md`의 Phase 6 섹션 참고).
 
 #### `mainwindow_runtime.cpp`
 
 - Main/CCTV/UGV/Playback 화면 생성
 - 런타임 화면 destroy/recreate
 - `rebuildRuntimeScreens()`
+- `openSettingsDialog()` — Phase 6에서 "장치 관리" 탭이 없어지면서 devicesChanged 이후 처리(재구성 트리거)가 같이 빠짐, 지금은 그냥 다이얼로그만 연다
 
 #### `mainwindow_navigation.cpp`
 
@@ -460,7 +504,7 @@ UI가 무엇을 표시할지, 세션 상태를 어떻게 갱신할지, stale mes
 
 #### `initializeAuthServices()`
 
-이 함수는 서비스 객체를 생성하고 공통 경로를 연결하는 출발점이다.
+서비스 객체를 생성하고 공통 경로를 연결하는 출발점. **서버 설정과 무관하게 항상 만드는 것**(`RestClient`/`OnvifLiteClient`/`DeviceService`/`CctvControlService`/`EventService`/`LocalEventListener`)과 **서버 설정(`apiBaseUrl`)이 있을 때만 만드는 것**(`AuthService`/`PlaybackService`/`UgvService`/`WsClient`)이 한 함수 안에서 순서대로 나뉜다 — `loadAppConfig()` 실패 시 `return false`가 그 경계선이다. 이 구조가 아니면 서버 설정이 없는(=이 프로젝트 기본 상태) 게스트 환경에서 카메라 서비스 자체가 안 만들어진다(Phase 3b 안정화 패치에서 발견/수정).
 
 #### `createRuntimeScreens(...)`
 
@@ -612,26 +656,32 @@ UI가 무엇을 표시할지, 세션 상태를 어떻게 갱신할지, stale mes
 
 ### 역할
 
-- 장치관리
 - 저장 경로
 - 정책 설정
 
 ### 현재 특징
 
 - 560x380 compact modal
-- 장치 저장은 `TeamClue/VMS_v1`
 - 저장 경로는 `TeamClue/VMS_v2`
-- ONVIF 검색 경로는 현재 미노출 처리
 
-### 왜 중요한가
+### 히스토리 (Phase 6)
 
-설정창은 단순 옵션 UI가 아니라:
+원래 "장치 관리" 탭이 있었다 — `QSettings("TeamClue","VMS_v1")`에 수동 RTSP 장치를 저장하는 팀 프로젝트 시절 기능인데, ONVIF discovery(`AppState.selectedChannelContexts`)와 완전히 분리되어 있어서 Phase 3b 안정화 패치 때 일단 탭을 비활성화만 해뒀다. 그런데 **탭을 잠가놔도 그 밑 데이터 소스는 계속 런타임에 쓰이고 있었다** — 사이드바 채널 트리에 "사용자 커스텀 장치"로 주입되고, `rtspUrlForDisplayName()`의 RTSP 폴백으로도 읽히고 있었다(죽은 코드도 정식 기능도 아닌 애매한 상태). Phase 6에서 탭과 관련 코드를 전부 제거 — 지금은 ONVIF 선택 결과만 신뢰한다.
 
-- 장치 목록 로컬 관리
-- 저장 디렉터리 정책
-- 일부 서비스/화면 재구성 트리거
+## 6.5a `DeviceCredentialDialog` (Phase 3b 신설)
 
-와 연결되는 지점이다.
+파일:
+
+- `device_credential_dialog.h/.cpp`
+
+### 역할
+
+- 장치별 ID/PW 입력 모달. `DeviceCheckScreen`에서 채널 선택 후 "VMS 시작"을 누를 때, 아직 자격증명이 캐시/키체인에 없는 디바이스마다 하나씩 뜬다.
+
+### 특징
+
+- 아이디/비밀번호 둘 다 비어있지 않아야 OK 버튼이 활성화된다(Phase 6에서 비밀번호 쪽 검증 추가).
+- 취소하면 "VMS 시작" 자체가 취소되고 `DeviceCheckScreen`에 그대로 남는다(Phase 3b 안정화 패치 — 원래는 그 디바이스만 조용히 빼고 나머지로 진행했는데, 디바이스가 하나뿐이면 "0개 선택"과 똑같아져서 그대로 Main에 진입해버리는 버그가 있었다).
 
 ## 6.6 `EventUiHelpers`
 
@@ -948,35 +998,43 @@ EventService와 실시간 알림 흐름이 이 객체에 의존한다.
 ### 특징
 
 - 응답 payload에서 access token, user id, error message를 추출하는 helper 성격도 가진다
-
-현재 주의:
-
-- `logout()` 경로의 fallback/기본 오류 문구 일부에 깨진 한글이 남아 있어 복구가 필요하다.
+- 서버 의존 서비스라 `apiBaseUrl`이 있을 때만 생성된다(§2.3 `initializeAuthServices()` 참고) — 로그인/회원가입 버튼은 이 서비스가 없으면 비활성화된다
 
 ## 8.4 `DeviceService`
 
 ### 역할
 
-- 장치 목록
-- 장치별 채널 목록
-- 채널 상세
+- 장치 목록 / 장치별 채널 목록 / 채널 상세 — `device.source` 설정으로 두 소스 중 하나를 탄다
+
+### 소스 분기 (Phase 1)
+
+- **`"onvif"`(기본)**: `OnvifLiteClient`로 WS-Discovery + `GetCapabilities`(Media/PTZ/Imaging 서비스별 실제 주소 획득) + `GetProfiles`(채널 목록+RTSP/코덱까지 한 번에) + `GetStreamUri`. `fetchDevices()` 시점에 디바이스별로 이 시퀀스를 다 돌려서 uuid별로 캐싱해두기 때문에, 이후 `fetchDeviceChannels()`/`fetchChannelDetail()`은 **캐시만 읽고 새 네트워크 호출을 안 한다** — 원래 서버 REST 방식이 7~9회 호출하던 걸 최초 discovery 1세트로 줄인 게 이 리팩토링의 핵심 성과 중 하나(`docs/refactoring_improvements.md` 2.3절).
+- **`"server"`**: 기존 REST 방식 그대로(`RestClient` 필요).
 
 ### 왜 중요한가
 
-DeviceCheck만의 서비스가 아니라, 런타임에서 RTSP/codec detail 정규화의 출발점이기도 하다.
+DeviceCheck만의 서비스가 아니라, 런타임에서 RTSP/codec/ONVIF PTZ·Imaging 주소·profile token 정규화의 출발점이기도 하다 — `finalize()`(`mainwindow_auth.cpp`)가 여기서 얻은 값을 `AppState.channelOnvifPtzXAddrById` 등으로 옮겨 담는다.
+
+### 주의할 점
+
+- `uuid → deviceId`(`idForUuid`)는 **세션마다 재할당되는 합성 ID**라 안정적이지 않다 — 여러 화면 새로고침에 걸쳐 같은 디바이스를 식별해야 하는 코드(예: 자격증명 캐시)는 `deviceId` 대신 `deviceIp`를 키로 써야 한다(Phase 3b에서 실제로 겪은 문제).
 
 ## 8.5 `EventService`
 
 ### 역할
 
-- 최근 이벤트 fetch
-- 상세 이벤트 fetch
-- WS 이벤트 ingest
+- 최근 이벤트 fetch(REST, 서버 있을 때만)
+- 상세 이벤트 fetch(REST)
+- WS 이벤트 ingest(`ingestWsMessage`, 서버 있을 때만)
+- **로컬 UDP 이벤트 ingest(`ingestLocalEvent`, Phase 4, 항상 동작)** — `LocalEventListener`가 직접 넘겨준다
 - dedupe / unread / cache trim
 
 ### 핵심 포인트
 
 - `kMaxCachedEvents = 200`
+- 로컬(UDP)과 서버(WS/REST) 두 경로가 **같은 `m_seenKeys` 캐시를 공유**한다 — `tryInsertEvent(event, eventId, prepend)`(Phase 6에서 `ingestEventObject`/`mergeEventArray`의 중복 로직을 통합) 하나가 두 경로 모두의 삽입 지점이다. eventId 키와 fallback(timestamp/channel/type 조합) 키를 항상 둘 다 확인해서, eventId 없는 로컬 이벤트와 eventId 있는 서버 relay 이벤트가 같은 물리적 이벤트라도 어느 한쪽 키로든 dedup되게 한다(Phase 6에서 발견/수정한 버그 — 원래는 eventId 있으면 그것만 키로 써서 두 경로가 서로 다른 키 공간에 살았다).
+- **알려진 제약**: 실제 서버가 카메라의 같은 UDP 이벤트를 relay하는 구조라면, 로그인 상태에서 같은 이벤트가 로컬+서버 양쪽으로 들어와도 지금은(포맷이 완전히 같다면) 정상적으로 dedup된다. 다만 실서버가 없어 이 시나리오 자체를 실제로 검증한 적은 없다.
+- `EventUiHelpers::currentEvents()`(§6.6)는 예전엔 선택된 채널과 `channelId`/이름이 일치하는 이벤트만 걸렀는데, 카메라가 붙이는 채널 식별자와 ONVIF discovery가 매기는 채널 식별자가 근본적으로 다른 번호 체계라 조용히 이벤트가 누락되는 버그가 있었다 — Phase 6에서 필터를 제거하고 텔레메트리만 걸러낸 나머지는 전부 보여주는 쪽으로 통일했다.
 - 최근 이벤트 검색은 서버 전체 검색이 아니라 현재 캐시에 대해 local filtering하는 구조와 연결된다
 
 ## 8.6 `PlaybackService`
@@ -996,11 +1054,19 @@ DeviceCheck만의 서비스가 아니라, 런타임에서 RTSP/codec detail 정�
 
 ### 역할
 
-- zoom/focus step 제어
+- zoom/focus step 제어 — **서버 프록시가 아니라 `OnvifLiteClient`로 카메라에 직접 ONVIF SOAP을 보낸다**(Phase 2)
+
+### 프로토콜 (Phase 2에서 REST→ONVIF로 전환)
+
+- zoom → PTZ `RelativeMove`(profile token 대상)
+- focus → Imaging `Move`(Relative) — 같은 profile token을 쓰고 있음(실제 ONVIF 스펙은 별도 `VideoSourceToken`을 요구할 수 있어 실카메라 연동 시 제약사항으로 남아있음, `docs/dev_execution_plan.md` 참고)
+- 두 호출 모두 WS-Security `UsernameToken`(Nonce+Created+PasswordDigest)을 요청마다 새로 계산해서 싣는다(Phase 3b) — 자격증명은 `AppState.channelOnvifUsernameById/PasswordById`(디바이스별 캐시에서 채널별로 복제해둔 것)에서 읽는다.
+- `channelId` → ONVIF PTZ/Imaging `xaddr`+profile token 매핑은 discovery 시점에 `DeviceService`가 알아내서 `AppState`로 노출해둔 걸 그대로 읽는다 — `CctvControlService`가 별도로 주소를 알아내지 않는다.
 
 ### 특징
 
 - 지원 step 값 검증(`-100, -10, -1, 1, 10, 100`) 같은 정책이 들어 있다
+- 서버 상태·로그인 여부와 완전히 무관하게 동작한다(설계 원칙 3) — `OnvifLiteClient`만 있으면 되고, 이 클라이언트는 서버 설정과 무관하게 항상 생성됨
 
 ## 8.8 `UgvService`
 
@@ -1107,6 +1173,65 @@ UGV 화면이나 dispatch 흐름을 건드릴 때는 반드시 이 서비스를 
 ### 특징
 
 - snapshot/clip UI와 결합되지만, 실제 인코딩 상태 모델은 이 클래스가 책임진다
+
+## 8.13 `OnvifLiteClient` (Phase 1~3b 신설)
+
+파일:
+
+- `onvif_lite_client.h/.cpp`
+
+### 역할
+
+- WS-Discovery(UDP multicast `239.255.255.250:3702`)로 카메라 탐색
+- `GetDeviceInformation`/`GetCapabilities`(Media/PTZ/Imaging 서비스별 실제 주소)/`GetProfiles`/`GetStreamUri` SOAP 호출
+- PTZ `RelativeMove`/Imaging `Move`(Relative) — WS-Security `UsernameToken` 포함
+
+### 특징
+
+- ONVIF 풀스펙이 아니라 이 프로젝트에 필요한 최소 흐름만 구현(설계 원칙 4). SOAP 파싱은 정규식 기반(namespace prefix에 안 흔들리게 local-name 매칭) — 목업 응답 기준으로는 충분하지만 실카메라 호환성은 검증 안 됨(알려진 제약, `docs/dev_execution_plan.md` 참고).
+- `fetchDeviceProfiles(...)`는 uuid별로 결과를 메모이즈한다 — `DeviceService`가 이 캐시를 그대로 재사용해서 채널 상세 조회가 새 네트워크 호출 없이 즉시 응답한다.
+- `discover()`/`fetchDeviceProfiles(...)`는 로그인 여부와 무관하게 항상 무인증. `relativeMove(...)`/`imagingRelativeMove(...)`만 username/password 인자를 받아 WS-Security 헤더를 생성한다.
+
+### 왜 중요한가
+
+이 클래스가 이 리팩토링의 핵심이다 — `DeviceService`/`CctvControlService`가 서버 대신 이 클라이언트로 카메라와 직접 통신하게 되면서 "서버 없이 동작"이 실제로 성립한다.
+
+## 8.14 `CredentialStore` (Phase 3b 신설)
+
+파일:
+
+- `credential_store.h/.cpp`
+
+### 역할
+
+- 카메라별 ID/PW를 QtKeychain(OS 네이티브 자격증명 저장소)에 영구 저장/로드 — 로그인 사용자 전용, 게스트는 `AppState`의 세션 캐시(`deviceCredentialUsernameByIp`/`PasswordByIp`)만 쓰고 이 클래스를 거치지 않는다.
+
+### 특징
+
+- `deviceIp`를 키로 쓴다(`deviceId`는 세션마다 재할당되는 합성 값이라 불안정 — §8.4 참고) — `AppState`의 세션 캐시와 동일한 키 스킴.
+- username+password를 **하나의 직렬화된 JSON 레코드**로 단일 키에 저장한다(Phase 6에서 두 개의 독립 키 방식에서 전환 — 한쪽만 쓰기 실패해도 서로 다른 시점 값이 섞이는 문제를 없앰). 로드 시 두 필드가 실제 문자열이고 비어있지 않은지까지 검증한다.
+- QtKeychain 접근은 `QEventLoop`로 감싼 동기 API로 노출(빠른 로컬 작업이라 감수).
+- CMake `FetchContent`로 소스를 받아 빌드에 포함(vcpkg 등 별도 설치 불필요).
+
+### 알려진 제약
+
+- 캐시/키체인에서 로드된 자격증명은 재검증 없이 신뢰한다(새로 입력한 것만 ONVIF ping으로 즉시 검증) — 카메라 비밀번호가 나중에 바뀌면 재입력 경로가 없다. 로그인 상태 자체를 이 환경에서 테스트할 방법이 없어(실서버 없음) 의도적으로 미해결.
+
+## 8.15 `LocalEventListener` (Phase 4 신설)
+
+파일:
+
+- `local_event_listener.h/.cpp`
+
+### 역할
+
+- UDP 소켓으로 카메라(목업 호스트의 `event_broadcaster`)가 broadcast하는 이벤트를 직접 수신, JSON 파싱 후 `eventReceived(QJsonObject)` 시그널로 넘긴다.
+
+### 특징
+
+- 로그인 여부와 무관하게 항상 동작(`MainWindow::initializeAuthServices()`에서 서버 설정 게이트 밖에 생성) — 이게 없으면 게스트 모드에서 이벤트 UI 자체가 동작 안 한다(Phase 4에서 발견/수정한 문제, §2.3 참고).
+- bind 실패(포트 충돌/방화벽)는 `errorOccurred`로 구분해서 로그. 개별 데이터그램 파싱 실패는 조용히 무시하고 로그만 남긴다(실카메라의 지저분한 브로드캐스트 대비, 설계 원칙 4).
+- 수신한 JSON은 `EventService::ingestLocalEvent(...)`로 그대로 넘어가서 기존 dedup/필수 필드 검증 로직(§8.5)을 그대로 탄다 — 이 클래스 자체는 파싱과 소켓 관리만 책임진다.
 
 ---
 
@@ -1408,9 +1533,11 @@ UGV는 "버튼이 안 먹는다"가 UI 문제일 수도 있지만, 서비스 sta
 - Playback marker clustering: 3분
 - playback slider: 표시용 중심, marker click 재생 유지
 - 알림센터: 최근 24시간 고정 목록(필터 버튼 미사용)
-- 장치 저장: `TeamClue/VMS_v1`
-- 저장 경로: `TeamClue/VMS_v2`
+- 저장 경로: `TeamClue/VMS_v2` (장치 관리 QSettings는 Phase 6에서 제거됨)
 - 앱/윈도우 아이콘: `:/styles/clue_logomark.svg`
+- `device.source` 기본값: `"onvif"` — 서버 REST가 아니라 카메라 직접 통신이 기본
+- 카메라 자격증명(ID/PW)은 discovery엔 필요 없고 RTSP 재생/PTZ 제어 시점에만 요구됨
+- 카메라 도메인 서비스(`OnvifLiteClient`/`DeviceService`/`CctvControlService`/`EventService`/`LocalEventListener`)는 서버 설정 유무와 무관하게 항상 생성됨
 
 이건 세부 구현보다 운영 정책에 가까운 사실이라, 기능 수정 시 쉽게 흔들지 않는 것이 좋다.
 
@@ -1434,10 +1561,8 @@ UGV는 "버튼이 안 먹는다"가 UI 문제일 수도 있지만, 서비스 sta
 
 ## 15. 함께 읽으면 좋은 문서
 
-- `docs/VMS_v2_code_assessment.md`
-- `docs/VMS_v2_implementation_history.md`
-- `docs/VMS_v2_post_phase8_execution_plan.md`
-- `docs/VMS_v2_popup_toast_status_matrix.md`
-- `docs/VMS_v2_performance_tracking.md`
-- `docs/subfiles/VMS_v2_architecture.md`
-- `docs/troubleshooting/troubleshooting_multiview_streaming.md`
+- `docs/roadmap.md` — 전체 Phase 로드맵과 설계 원칙
+- `docs/dev_execution_plan.md` — Phase별 세부 실행 로그(조사·결정·구현·게이트 테스트 전부)
+- `docs/refactoring_improvements.md` — 왜/무엇을 리팩토링했는지 성과 관점 요약(포트폴리오용)
+
+팀 프로젝트 원본에서 가져온 기획/이력 문서(`VMS_v2_code_assessment.md`, `VMS_v2_implementation_history.md` 등)는 이 리팩토링과 무관해서 Phase 6에서 정리했다 — 필요하면 git 히스토리로 확인.

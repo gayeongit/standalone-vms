@@ -9,14 +9,11 @@
 #include <QDateEdit>
 #include <QDateTime>
 #include <QDialog>
-#include <QDir>
-#include <QFileInfo>
 #include <QLabel>
 #include <QPixmap>
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QSet>
-#include <QStandardPaths>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -202,16 +199,6 @@ QString displayEventTypeName(const QString &rawType)
     return trimmed;
 }
 
-QString detailedEventTypeLabel(const QString &rawType)
-{
-    const QString display = displayEventTypeName(rawType);
-    const QString trimmed = rawType.trimmed();
-    if (trimmed.isEmpty() || display == trimmed) {
-        return display;
-    }
-    return QStringLiteral("%1 (%2)").arg(display, trimmed);
-}
-
 QString shortChannelName(const EventInfo &eventInfo)
 {
     const auto &contexts = AppState::instance().selectedChannelContexts;
@@ -274,52 +261,6 @@ QVector<EventInfo> filteredNotificationEvents(NotificationRange range)
     return filtered;
 }
 
-QString sanitizeFileToken(const QString &src)
-{
-    QString out;
-    out.reserve(src.size());
-    for (const QChar ch : src) {
-        if (ch.isLetterOrNumber()) {
-            out.append(ch.toLower());
-        } else {
-            out.append('_');
-        }
-    }
-    while (out.contains(QStringLiteral("__"))) {
-        out.replace(QStringLiteral("__"), QStringLiteral("_"));
-    }
-    return out.trimmed();
-}
-
-QString findDesktopEventPreviewPath(const EventInfo &eventInfo)
-{
-    const QString desktopDir = QStandardPaths::writableLocation(QStandardPaths::DesktopLocation);
-    if (desktopDir.isEmpty()) {
-        return {};
-    }
-
-    const QString channelToken = sanitizeFileToken(eventInfo.channel);
-    const QString typeToken = sanitizeFileToken(eventInfo.type);
-    const QStringList candidates = {
-        QStringLiteral("event_preview.jpg"),
-        QStringLiteral("event_preview.png"),
-        QStringLiteral("event.jpg"),
-        QStringLiteral("event.png"),
-        QStringLiteral("event_%1.jpg").arg(channelToken),
-        QStringLiteral("event_%1.png").arg(channelToken),
-        QStringLiteral("event_%1_%2.jpg").arg(channelToken, typeToken),
-        QStringLiteral("event_%1_%2.png").arg(channelToken, typeToken)
-    };
-
-    for (const QString &name : candidates) {
-        const QString abs = QDir(desktopDir).filePath(name);
-        if (QFileInfo::exists(abs)) {
-            return abs;
-        }
-    }
-    return {};
-}
-
 } // namespace
 
 namespace EventUiHelpers {
@@ -336,53 +277,26 @@ EventService *eventService()
 
 QVector<EventInfo> currentEvents()
 {
+    // Phase 6: 예전엔 선택된 CCTV 채널과 channelId/표시명이 정확히 일치하는 이벤트만 통과시켰다.
+    // Phase 4에서 카메라가 UDP로 직접 쏘는 로컬 이벤트를 받기 시작하면서 이 필터가 조용히
+    // 이벤트를 떨어뜨리는 버그가 됐다 — 카메라가 자체적으로 붙이는 channelId/channelName은
+    // ONVIF discovery가 VMS 쪽에서 독자적으로 매기는 channelId/displayName과 근본적으로 다른
+    // 번호 체계라 서로 안 맞을 수 있다(우연히 맞는 것만 통과, 나머지는 조용히 사라짐).
+    // 대시보드 인라인 이벤트뷰는 애초에 이 필터를 안 거쳐서 전부 잘 보이고 있었다 — 세 화면
+    // (대시보드/이벤트 검색/알림센터)이 같은 데이터를 봐야 하므로, 매칭 실패를 이유로 숨기지
+    // 않고 전부 보여주는 쪽으로 통일한다.
     if (!g_eventService) {
         return {};
     }
     const QVector<EventInfo> all = g_eventService->events();
-    const auto &contexts = AppState::instance().selectedChannelContexts;
-    if (contexts.isEmpty()) {
-        QVector<EventInfo> withoutTelemetry;
-        withoutTelemetry.reserve(all.size());
-        for (const auto &eventInfo : all) {
-            if (!eventInfo.type.trimmed().startsWith(QStringLiteral("telemetry."), Qt::CaseInsensitive)) {
-                withoutTelemetry.push_back(eventInfo);
-            }
-        }
-        return withoutTelemetry;
-    }
-
-    QSet<int> selectedCctvChannelIds;
-    QSet<QString> selectedCctvDisplayNames;
-    for (const auto &ctx : contexts) {
-        const bool isCctv = ctx.deviceType.trimmed().compare(QStringLiteral("CCTV"), Qt::CaseInsensitive) == 0;
-        if (!isCctv) {
-            continue;
-        }
-        if (ctx.channelId >= 0) {
-            selectedCctvChannelIds.insert(ctx.channelId);
-        }
-        const QString display = ctx.displayName.trimmed();
-        if (!display.isEmpty()) {
-            selectedCctvDisplayNames.insert(display);
-        }
-    }
-
-    QVector<EventInfo> filtered;
-    filtered.reserve(all.size());
+    QVector<EventInfo> withoutTelemetry;
+    withoutTelemetry.reserve(all.size());
     for (const auto &eventInfo : all) {
-        if (eventInfo.type.trimmed().startsWith(QStringLiteral("telemetry."), Qt::CaseInsensitive)) {
-            continue;
-        }
-        const bool matchedById = eventInfo.channelId >= 0
-            && selectedCctvChannelIds.contains(eventInfo.channelId);
-        const bool matchedByName = !eventInfo.channel.trimmed().isEmpty()
-            && selectedCctvDisplayNames.contains(eventInfo.channel.trimmed());
-        if (matchedById || matchedByName) {
-            filtered.push_back(eventInfo);
+        if (!eventInfo.type.trimmed().startsWith(QStringLiteral("telemetry."), Qt::CaseInsensitive)) {
+            withoutTelemetry.push_back(eventInfo);
         }
     }
-    return filtered;
+    return withoutTelemetry;
 }
 
 int currentUnreadCount()
@@ -568,21 +482,15 @@ void openEventSearchDialog(QWidget *parent)
     }
     resultList->setSortingEnabled(true);
 
+    // Phase 6: 예전엔 팀 프로젝트의 고정 taxonomy 4종을 항상 옵션에 끼워 넣었는데, 지금 목업은
+    // 그 타입들을 아예 안 만들어서 골라도 항상 결과 0개인 죽은 옵션으로 남아있었다. 실제로 들어온
+    // 이벤트 타입만으로 적응형으로 채운다 — 서버가 붙어 그 타입의 이벤트가 실제로 오면 자동으로 나타난다.
     QSet<QString> typeLabels;
     for (const auto &eventInfo : EventUiHelpers::currentEvents()) {
         const QString typeLabel = displayEventTypeName(eventInfo.type).trimmed();
         if (!typeLabel.isEmpty()) {
             typeLabels.insert(typeLabel);
         }
-    }
-    const QStringList knownTypes = {
-        QStringLiteral("이상 온도 감지"),
-        QStringLiteral("카메라 가림 감지"),
-        QStringLiteral("충격 감지"),
-        QStringLiteral("움직임 감지"),
-    };
-    for (const QString &label : knownTypes) {
-        typeLabels.insert(label);
     }
     QList<QString> sortedTypes = typeLabels.values();
     std::sort(sortedTypes.begin(), sortedTypes.end(), [](const QString &a, const QString &b) {

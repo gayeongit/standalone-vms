@@ -1,5 +1,6 @@
 #include "playback_screen.h"
 
+#include "app_state.h"
 #include "common_widgets.h"
 #include "common_ui.h"
 #include "playback_screen_helpers.h"
@@ -98,7 +99,10 @@ void PlaybackScreen::loadTimelineForChannel(int channelId, const QString &channe
     // 이 함수는 "선택한 채널/날짜"에 대한 timeline만 요청하고,
     // 결과 적용은 generation guard를 거쳐 최신 요청만 반영한다.
     // 즉 사용자가 트리를 빠르게 바꿔도 이전 응답이 UI를 덮지 않게 한다.
-    if (!m_playbackService) {
+    // 사이드바 트리의 "로그인이 필요한 기능입니다" 등 상태 항목은 선택 불가 플래그를 걸어뒀지만,
+    // 혹시 다른 경로(트리 우회, 잔여 AppState 값 등)로 이 함수가 호출되더라도 실제 네트워크
+    // 요청이 나가지 않도록 여기서도 로그인 여부를 최종 방어선으로 한 번 더 확인한다.
+    if (!m_playbackService || !AppState::instance().isAuthenticated) {
         if (!m_timelineServiceDisconnectPopupShown) {
             PopupManager::showInfo(this, "이전영상", "PlaybackService가 연결되지 않았습니다.");
             m_timelineServiceDisconnectPopupShown = true;

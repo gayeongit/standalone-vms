@@ -15,7 +15,6 @@ bool isCompactScreen(ScreenId screenId);
 bool shouldTrackFirstFrameForScreen(ScreenId screenId);
 QVector<SelectedChannelContext> normalizeSelectedContextsForRuntime(const QVector<SelectedChannelContext> &contexts);
 QString screenIdName(ScreenId screenId);
-void applyDeviceChangesToRuntimeState(AppState &state);
 void pruneStateDeviceSelection(AppState &state);
 QSet<QString> activeChannelsForScreen(ScreenId screenId);
 

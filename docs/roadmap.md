@@ -102,8 +102,8 @@ RPi를 당장 쓸 수 없는 상황이라 Phase 0(RPi 테스트 베드)부터 �
 | 3a | 로그인/게스트 분기 (카메라 무관) | 없음 | 완료 (2026-09-03) |
 | 3b | 로컬 자격증명 캐시 | Phase 1 | 완료 (2026-09-16, 안정화 패치 2026-09-17) |
 | 4 | 이벤트 직접 수신 경로 | Phase 0 | 완료 (2026-09-17) |
-| 5 | Playback (mediamtx 기반, 더미 콘텐츠) | Phase 1 | **대기 (다음 작업, 선택)** |
-| 6 | 통합 검증 + 문서 정리 (UGV 등 미사용 코드 최종 정리 포함) | 전체 | 대기 |
+| 5 | Playback (mediamtx 기반, 더미 콘텐츠) | Phase 1 | 스킵 (2026-09-17, 선택 사항이었음 — 사유는 5절 참고) |
+| 6 | 통합 검증 + 문서 정리 (UGV 등 미사용 코드 최종 정리 포함) | 전체 | 거의 완료 (2026-09-19, README만 남음 — 사용자가 직접 마무리) |
 
 Phase 3b, 4는 서로 독립적이라 순서 바꿔도 무방. Phase 5는 시간 나면.
 
@@ -214,9 +214,11 @@ Phase 3b, 4는 서로 독립적이라 순서 바꿔도 무방. Phase 5는 시간
 
 **상태.** 완료 (2026-09-17). `EventService`가 서버 설정 게이트 뒤에서만 생성되던 문제(Phase 3b 안정화 패치의 4.1과 같은 종류)를 같이 고쳐서, 서버 없이도 로컬 이벤트가 항상 동작하게 함. `MainScreen`에 이미 있던 5초 디바운스+burst 안전장치(원래부터 있던 화면 계층 코드, 무수정)가 그대로 살아있어 별도 배칭 로직 추가 불필요. 세부 내용은 `docs/dev_execution_plan.md`의 Phase 4 섹션 참고.
 
+**알려진 제약 (2026-09-19).** 로컬 UDP 수신(`LocalEventListener`)은 로그인 여부와 무관하게 항상 켜져 있고, 로그인 시 서버 WS/REST가 그 위에 추가로 얹히는 구조(게스트 것을 대체하는 게 아니라 병행). 다만 실제 서버가 카메라의 같은 UDP 이벤트를 relay하는 구조라면, 로그인 상태에서 같은 물리적 이벤트가 로컬+서버 양쪽으로 들어와 dedup 키(포맷 차이) 때문에 중복 표시될 수 있음 — 실서버가 없어 지금은 검증 불가, 실서버 연동 시점에 재검증 필요. 세부 내용은 `docs/dev_execution_plan.md` Phase 4 섹션 참고.
+
 ---
 
-### Phase 5 — Playback (선택)
+### Phase 5 — Playback (선택, 스킵)
 
 **하려는 것.** SUNAPI 느낌의 단순 REST로 목업 호스트가 "이 시간대 영상 URL"을 응답 → mediamtx로 서빙 → `PlaybackService`가 그대로 소비.
 
@@ -226,14 +228,30 @@ Phase 3b, 4는 서로 독립적이라 순서 바꿔도 무방. Phase 5는 시간
 
 **확인할 것.** Playback 화면에서 날짜/채널 선택 → 더미 영상 재생, 마커 클릭 시 해당 시점 재생.
 
+**상태 (2026-09-17).** 검토 후 스킵, Phase 6로 진행. Phase 5 진입을 고민하던 중 "이벤트 상세에서 그 시점 영상 바로 보기"/"이벤트 발생 시 스냅샷" 같은 확장 아이디어가 나왔는데, 둘 다 의미 있으려면 실제 녹화 아카이브(=서버)가 있어야 하고, 게스트 모드의 세션 휘발성 히스토리나 로컬 mediamtx 루프 목업으로는 흉내조차 낼 수 없음 — 억지로 만들면 설계 원칙 4(목업은 정교화 불필요)에 부딪힘. 애초에 `CLAUDE.md` 설계 원칙 3이 "이벤트 히스토리는 로그인 부가 기능"이라고 이미 정해두고 있어서, 이 방향은 처음부터 서버 없이 동작이라는 이 프로젝트의 핵심 스코프 밖이었음. 아이디어 자체는 `docs/refactoring_improvements.md` 6절에 기록해두고, 서버가 실제로 붙는 시점에 재검토. Phase 6에서 게스트 모드의 Playback 화면이 날것의 "PlaybackService unavailable" placeholder를 보여주는 것만 UGV/장치관리 탭과 같은 패턴으로 정리.
+
 ---
 
 ### Phase 6 — 통합 검증 + 문서 정리
 
+기존 항목:
+
 - 서버 켠 상태 / 끈 상태 둘 다 정상 동작하는지 체크리스트로 확인
-- Phase 3a에서 스텁/비활성화로만 처리했던 UGV 등 미사용 코드를 이 시점에 최종 정리(삭제 여부 판단)
-- README/발표자료 갱신 (기존 `VMS_v2_presentation_material.md` 참고해서 재구성)
+- Phase 3a에서 스텁/비활성화로만 처리했던 UGV 등 미사용 코드를 이 시점에 최종 정리(삭제 여부 판단), `cgi_mock.cpp`도 마찬가지
+- README/발표자료 갱신
 - 아키텍처 변경 전/후 다이어그램 정리
+- (당시 `docs/code_review_stabilization_plan.md` 7절이었던 항목, 파일은 Phase 6 문서 정리 때 삭제) AppState 분해, 대형 파일 분할, 중복 제거, 빌드/의존성 재현성, 로깅 체계 `QLoggingCategory` 등 — Phase 6 스코프 결정 때 전부 이번 라운드 완료 조건에서 제외하기로 재확인(`docs/dev_execution_plan.md` "Phase 6 마무리 라운드" 섹션 참고), 구현은 안 함
+
+**진입 전 재조사(2026-09-17)로 추가된 항목:**
+
+- **`docs/core_classes.md` 갱신** — 첫 커밋(2026-09-03) 이후 한 번도 안 바뀐 채 방치되어 있음. `CctvControlService` 등 기존 항목이 ONVIF 전환 이전 상태로 남아있고, `OnvifLiteClient`/`CredentialStore`/`DeviceCredentialDialog`/`LocalEventListener` 등 이번에 새로 생긴 클래스는 아예 없음. `CLAUDE.md`가 정해둔 "Phase 완료 후 부분 수정" 규칙을 여태 안 지킨 상태라 Phase 6에서 한 번에 따라잡아야 함.
+- **발표자료 항목 재조정** — 원래 "기존 `VMS_v2_presentation_material.md` 참고해서 재구성"이라고 되어 있었는데, 이 파일이 이 레포에 없음(팀 프로젝트 쪽에만 있던 것으로 보임). "참고해서 재구성"이 아니라 새로 작성하는 걸로 목표를 바꿔야 함.
+- **"깨진 한글" 문서 항목 정리** — `core_classes.md`에 `configureLoginScreenState()`/`handleLogoutRequest()`의 기본 오류 문구에 mojibake가 남아있다고 기록되어 있었는데, 이번 세션 중 해당 함수들을 고치면서 이미 정상 텍스트로 바뀐 것으로 확인됨. 문서에서 해당 기록 제거.
+- **Phase 5 스킵으로 붕 뜬 보안 항목 이관** — 당시 `code_review_stabilization_plan.md`(파일은 Phase 6 문서 정리 때 삭제) 6절이었던 항목: 다운로드 URL same-origin 정책, Bearer 토큰 외부 URL 전달 금지, 파일명 path traversal 방지, 다운로드 로직 서비스 분리가 "Phase 5 착수 시" 조건으로 되어 있었는데 Phase 5를 스킵했음. 다만 이 코드(`PlaybackScreen`의 다운로드 로직)는 서버 있는 로그인 모드에서 지금도 실제로 쓰이는 살아있는 코드라, 스킵 대상이 아니라 Phase 6으로 그대로 이관해서 처리 — origin 체크/파일명 정규화/redirect 처리는 구현 완료(`docs/dev_execution_plan.md` Phase 6 섹션 참고), `PlaybackDownloadService` 분리 같은 구조 개선만 스코프 밖으로 보류.
+- **(참고, 강제 아님) 별개 기기 간 통합 테스트** — WS-Discovery/UDP broadcast를 이번 세션 내내 로컬 PC 한 대(loopback)로만 확인함. 여건 되면 다른 기기에서 VMS를 띄워 "같은 네트워크, 서버 없이 동작" 주장을 완전히 검증.
+- TODO/FIXME 코드 주석은 남은 게 없음 확인(추가 조치 불필요).
+
+**상태 (2026-09-19).** 대부분 완료. 코드 정확성 라운드(Playback 다운로드 보안, mojibake 수정, `CredentialStore` 원자적 저장, 죽은 코드 삭제)에 이어, 코덱스/지피티 리뷰 마무리 라운드(`VMS_v1` 레거시 장치 관리 완전 제거, 이벤트 dedup eventId/fallback 키 교차 버그 수정, `CredentialStore::load()` 필드 타입 검증)까지 빌드 확인 완료. UGV는 계획대로 완전 삭제하지 않고 비활성화 유지로 최종 확정(현재 환경에서 `type=="UGV"` 장치가 나올 경로 자체가 없어 진입 불가능한 잠든 코드라 위험 대비 효용 낮다고 판단). 문서 정리도 완료: `docs/core_classes.md`를 전면 갱신하고(신규 클래스 섹션 추가, 아키텍처 다이어그램을 이 문서로 이전), 이 리포에 복사되어 온 뒤 한 번도 안 쓰인 팀 프로젝트 잔재 문서(`docs/subfiles/` 전체, `VMS_v2_*.md` 5개, API 설계 CSV 4개, `code_review_stabilization_plan.md`)를 삭제해서 `docs/`에는 `core_classes.md`/`dev_execution_plan.md`/`refactoring_improvements.md`/`roadmap.md` 4개만 남김. **발표자료 항목은 드롭** — 이 리팩토링은 발표용이 아니라 자기소개서/포트폴리오용으로만 쓸 예정이라 별도 발표자료가 필요 없다고 판단, 아키텍처 다이어그램은 `core_classes.md`로 흡수. 남은 건 README(사용자가 스크린샷과 함께 마지막에 직접 정리) 하나뿐 — 그 외 Phase 6 항목은 모두 완료로 간주.
 
 ---
 
