@@ -1008,7 +1008,7 @@ EventService와 실시간 알림 흐름이 이 객체에 의존한다.
 
 ### 소스 분기 (Phase 1)
 
-- **`"onvif"`(기본)**: `OnvifLiteClient`로 WS-Discovery + `GetCapabilities`(Media/PTZ/Imaging 서비스별 실제 주소 획득) + `GetProfiles`(채널 목록+RTSP/코덱까지 한 번에) + `GetStreamUri`. `fetchDevices()` 시점에 디바이스별로 이 시퀀스를 다 돌려서 uuid별로 캐싱해두기 때문에, 이후 `fetchDeviceChannels()`/`fetchChannelDetail()`은 **캐시만 읽고 새 네트워크 호출을 안 한다** — 원래 서버 REST 방식이 7~9회 호출하던 걸 최초 discovery 1세트로 줄인 게 이 리팩토링의 핵심 성과 중 하나(`docs/refactoring_improvements.md` 2.3절).
+- **`"onvif"`(기본)**: `OnvifLiteClient`로 WS-Discovery + `GetCapabilities`(Media/PTZ/Imaging 서비스별 실제 주소 획득) + `GetProfiles`(채널 목록+RTSP/코덱까지 한 번에) + `GetStreamUri`. `fetchDevices()` 시점에 디바이스별로 이 시퀀스를 다 돌려서 uuid별로 캐싱해두기 때문에, 이후 `fetchDeviceChannels()`/`fetchChannelDetail()`은 **캐시만 읽고 새 네트워크 호출을 안 한다** — 원래 서버 REST 방식은 조회할 때마다 7~9회 호출했는데, 최초 탐색 시 사전 조회 후 캐싱해서 이후 조회는 네트워크 요청 0회로 만든 게 이 리팩토링의 핵심 성과 중 하나(`docs/refactoring_improvements.md` 2.3절).
 - **`"server"`**: 기존 REST 방식 그대로(`RestClient` 필요).
 
 ### 왜 중요한가

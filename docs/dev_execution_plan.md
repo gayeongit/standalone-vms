@@ -183,7 +183,7 @@ Phase 1 착수 전, 기존 서버 REST API 형식을 그대로 카메라/목업 
 - [x] DeviceCheckScreen 새로고침 시 크래시/중복 호출 없이 다시 스캔됨 (사용자 확인)
 - [ ] (선택, 미실행) `device.source`를 `"server"`로 바꾸고 기존 서버 켠 상태에서 기존 REST 흐름이 회귀 없이 동작하는지 — 필수 아님
 
-**상태: Phase 1 완료 (2026-09-08).** `OnvifLiteClient` + `DeviceService` 캐싱으로 디바이스 조회 챗니스(7~9회 → discovery+프로필 조회 1세트) 구조적으로 해결, 목업 호스트 대상으로 엔드투엔드(DeviceCheck→Main 재생) 확인 완료.
+**상태: Phase 1 완료 (2026-09-08).** `OnvifLiteClient` + `DeviceService` 캐싱으로 디바이스 조회 챗니스(매 조회마다 7~9회 → 최초 탐색 시 사전 조회 후 캐싱, 이후 조회는 네트워크 요청 0회) 구조적으로 해결, 목업 호스트 대상으로 엔드투엔드(DeviceCheck→Main 재생) 확인 완료.
 
 ---
 

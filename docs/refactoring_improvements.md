@@ -145,8 +145,8 @@ Phase 3b를 닫은 뒤, 다음 Phase로 넘어가기 전에 지금까지 쌓인 
 |---|---|---|
 | 서버 없을 때 | 로그인 화면에서 진입 불가 | 게스트로 DeviceCheck → Main까지 진입 가능 |
 | 카메라 데이터 경로 | 전부 서버 REST 프록시 | VMS가 카메라(목업/실카메라)와 직접 통신 |
-| 디바이스 2개·채널 2개 조회 시 HTTP/SOAP 호출 | 7~9회 (매 조회마다 재발생) | discovery+프로필 조회 1세트 (최초 1회), 이후 화면 조작은 캐시 응답 |
-| 채널 목록/상세 조회 | 별도 엔드포인트 2단계 | ONVIF `GetProfiles` 한 번으로 통합 |
+| 디바이스 2개·채널 2개 조회 시 HTTP/SOAP 호출 | 7~9회 (매 조회마다 재발생) | 최초 탐색 시 사전 조회 후 캐싱(최초 한 번만 여러 번 호출), 이후 조회는 네트워크 요청 0회 |
+| 채널 목록/상세 조회 | 별도 엔드포인트 2단계 | ONVIF `GetProfiles` 응답에 채널 목록과 코덱 정보가 함께 와서 별도 상세 조회 불필요 |
 | zoom/focus 제어 | 서버 REST 프록시(POST+JSON body) | 서버 상태와 무관하게 카메라로 직접 ONVIF PTZ/Imaging SOAP |
 | ONVIF 서비스 주소 사용 | Device Service 주소를 Media/PTZ/Imaging에도 하드코딩 재사용 | `GetCapabilities`로 서비스별 실제 주소를 얻어 그 주소로 호출 |
 | 카메라 자격증명 | 서버가 대신 인증, VMS는 자격증명을 몰라도 됨 | discovery는 무인증 유지, RTSP/PTZ 사용 시점에만 요구 — 게스트는 세션 휘발성, 로그인은 QtKeychain 영구 저장 |

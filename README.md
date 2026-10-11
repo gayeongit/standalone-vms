@@ -6,7 +6,7 @@
 
 | | 원본 | 이번 프로젝트 |
 |---|---|---|
-| 장치/채널 조회 | 서버 REST (호출 7~9회) | ONVIF WS-Discovery + `GetProfiles` |
+| 장치/채널 조회 | 서버 REST (조회할 때마다 7~9회) | ONVIF로 최초 탐색 시 사전 조회 후 캐싱, 이후 조회는 네트워크 요청 0회 |
 | zoom / focus | 서버 REST 프록시 | ONVIF PTZ / Imaging SOAP |
 | 카메라 계정 | 서버가 대신 인증 | 로컬 입력 (게스트는 세션만, 로그인은 QtKeychain 저장) |
 | 이벤트 수신 | 카메라 → 서버 → WS | 카메라 → UDP 직접 수신 |
