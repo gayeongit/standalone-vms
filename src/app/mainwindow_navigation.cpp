@@ -120,8 +120,10 @@ void MainWindow::applyWindowGeometryForScreen(ScreenId screenId)
 
     if (compactScreen) {
         if (screenId == ScreenId::Login || screenId == ScreenId::Signup) {
+            // Login 높이는 서버 설정이 없을 때 뜨는 두 줄짜리 안내 문구(authStatusLabel)까지
+            // 들어가게 잡는다 — 380이면 고정 크기 창 안에서 입력칸이 눌려 placeholder가 안 보였다.
             const QSize targetSize = (screenId == ScreenId::Login)
-                ? QSize(400, 380)
+                ? QSize(400, 430)
                 : QSize(400, 460);
             setMinimumSize(targetSize);
             setMaximumSize(targetSize);
