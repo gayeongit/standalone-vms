@@ -20,9 +20,13 @@ permissions:
 
 env:
   QT_VERSION: 6.8.3
-  # 1.26부터 Windows 설치 파일이 단일 .exe로 바뀌었는데 무인 설치 옵션이 문서화돼 있지 않아서,
-  # 무인 설치(msiexec /qn)가 확실한 마지막 MSI 버전을 쓴다. 앱이 쓰는 플러그인은 1.24에도 모두 있다.
-  GST_VERSION: 1.24.13
+  # GStreamer 공식 서버(freedesktop)의 devel 설치 파일(~700MB)이 러너에서 받을 때마다 중간에 끊겨서,
+  # 개발 PC와 같은 1.28.6 설치본에서 빌드·배포에 필요한 것만 추린 zip(~73MB)을
+  # 이 레포의 ci-deps 릴리즈에 올려두고 그걸 받는다.
+  # 구성: bin/(DLL·pkg-config.exe), include/, lib/*.lib, lib/pkgconfig/, lib/glib-2.0/include/,
+  #       lib/gstreamer-1.0/(앱이 쓰는 플러그인 13개)
+  GST_VERSION: 1.28.6
+  GST_DEPS_URL: https://github.com/${{ github.repository }}/releases/download/ci-deps/gstreamer-1.28.6-msvc-x86_64-ci.zip
 
 jobs:
   build:
@@ -51,20 +55,14 @@ jobs:
           path: C:\gstreamer
           key: gstreamer-msvc-x86_64-${{ env.GST_VERSION }}
 
-      - name: Install GStreamer (runtime + devel)
+      - name: Install GStreamer (ci-deps 릴리즈의 slim 패키지)
         if: steps.gst-cache.outputs.cache-hit != 'true'
         run: |
-          $base = "https://gstreamer.freedesktop.org/data/pkg/windows/$env:GST_VERSION/msvc"
-          foreach ($name in "gstreamer-1.0-msvc-x86_64-$env:GST_VERSION.msi",
-                            "gstreamer-1.0-devel-msvc-x86_64-$env:GST_VERSION.msi") {
-            # freedesktop 서버가 큰 파일(devel MSI) 전송 중 연결을 끊는 경우가 있어
-            # Invoke-WebRequest 대신 재시도·이어받기(-C -)가 되는 curl 사용
-            curl.exe -L --fail --silent --show-error --retry 5 --retry-delay 5 --retry-all-errors -C - -o $name "$base/$name"
-            if ($LASTEXITCODE -ne 0) { throw "$name 다운로드 실패 (curl exit $LASTEXITCODE)" }
-            # ADDLOCAL=ALL: 기본 설치엔 gst-libav(avdec_h264/h265)가 빠질 수 있어 전체 설치
-            $p = Start-Process msiexec -ArgumentList "/i `"$name`" /qn ADDLOCAL=ALL INSTALLDIR=C:\gstreamer\" -Wait -PassThru
-            if ($p.ExitCode -ne 0) { throw "$name 설치 실패 (exit $($p.ExitCode))" }
-          }
+          curl.exe -L --fail --silent --show-error --retry 5 --retry-delay 5 --retry-all-errors -o gst.zip $env:GST_DEPS_URL
+          if ($LASTEXITCODE -ne 0) { throw "GStreamer 패키지 다운로드 실패 (curl exit $LASTEXITCODE)" }
+          New-Item -ItemType Directory -Force C:\gstreamer | Out-Null
+          tar.exe -xf gst.zip -C C:\gstreamer
+          if ($LASTEXITCODE -ne 0) { throw "GStreamer 패키지 압축 해제 실패" }
 
       # 설치 루트를 하드코딩하지 않고 pkg-config.exe 위치로 찾는다
       - name: Set GStreamer env
