@@ -1,0 +1,156 @@
+# Windows 빌드 검증(CI) + 태그 push 시 배포 패키지 생성·GitHub Release 업로드(CD)
+#
+# - main push / PR: Qt 6.8 + MSVC + GStreamer로 빌드되는지 확인하고, 배포용 zip을 Actions 아티팩트로 남긴다.
+# - v* 태그 push: 같은 zip을 GitHub Release에 올린다.
+#
+# 배포 zip 구조는 main.cpp가 기대하는 형태를 따른다 — exe 옆에 Qt/GStreamer DLL,
+# 그리고 exe 옆 gstreamer-1.0/ 폴더에 필요한 플러그인만 넣는다(GST_PLUGIN_PATH 자동 지정).
+
+name: build-and-release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write   # Release 업로드용
+
+env:
+  QT_VERSION: 6.8.3
+  # GStreamer 공식 서버(freedesktop)의 devel 설치 파일(~700MB)이 러너에서 받을 때마다 중간에 끊겨서,
+  # 개발 PC와 같은 1.28.6 설치본에서 빌드·배포에 필요한 것만 추린 zip(~73MB)을
+  # 이 레포의 ci-deps 릴리즈에 올려두고 그걸 받는다.
+  # 구성: bin/(DLL·pkg-config.exe), include/, lib/*.lib, lib/pkgconfig/, lib/glib-2.0/include/,
+  #       lib/gstreamer-1.0/(앱이 쓰는 플러그인 14개)
+  # zip 내용을 바꾸면 GST_DEPS_REV를 올려서 예전 캐시를 안 쓰게 한다.
+  GST_VERSION: 1.28.6
+  GST_DEPS_REV: 2
+  GST_DEPS_ASSET: gstreamer-1.28.6-msvc-x86_64-ci.zip
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      # cl.exe / VS 번들 CMake·Ninja를 PATH에 올린다
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          arch: win64_msvc2022_64
+          modules: qtwebsockets
+          cache: true
+
+      # actions/cache는 job이 성공해야만 저장해서, 뒤 단계가 실패하면 매번 다시 받게 된다.
+      # restore/save를 나눠서 설치 직후 바로 캐시에 저장한다.
+      - name: Restore GStreamer cache
+        id: gst-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: C:\gstreamer
+          key: gstreamer-msvc-x86_64-${{ env.GST_VERSION }}-r${{ env.GST_DEPS_REV }}
+
+      # releases/download/... 주소가 504를 반복해서, API 경로로 받는 gh release download를 쓴다
+      - name: Install GStreamer (ci-deps 릴리즈의 slim 패키지)
+        if: steps.gst-cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download ci-deps --repo ${{ github.repository }} --pattern $env:GST_DEPS_ASSET --output gst.zip
+          if ($LASTEXITCODE -ne 0) { throw "GStreamer 패키지 다운로드 실패" }
+          New-Item -ItemType Directory -Force C:\gstreamer | Out-Null
+          tar.exe -xf gst.zip -C C:\gstreamer
+          if ($LASTEXITCODE -ne 0) { throw "GStreamer 패키지 압축 해제 실패" }
+
+      - name: Save GStreamer cache
+        if: steps.gst-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: C:\gstreamer
+          key: gstreamer-msvc-x86_64-${{ env.GST_VERSION }}-r${{ env.GST_DEPS_REV }}
+
+      # 설치 루트를 하드코딩하지 않고 pkg-config.exe 위치로 찾는다
+      - name: Set GStreamer env
+        run: |
+          $pc = Get-ChildItem C:\gstreamer -Recurse -Filter pkg-config.exe | Select-Object -First 1
+          if (-not $pc) { throw "pkg-config.exe를 찾지 못함 — GStreamer devel 설치 확인 필요" }
+          $root = Split-Path $pc.DirectoryName -Parent
+          "GST_ROOT=$root" >> $env:GITHUB_ENV
+          "PKG_CONFIG_PATH=$root\lib\pkgconfig" >> $env:GITHUB_ENV
+          "$root\bin" >> $env:GITHUB_PATH
+          Write-Host "GST_ROOT=$root"
+
+      # CMakeLists.txt는 GStreamer를 QUIET로 찾기 때문에, 못 찾아도 영상 재생이 빠진 exe가
+      # "빌드 성공"으로 나온다. CI에서는 여기서 막는다.
+      - name: Verify GStreamer
+        run: |
+          pkg-config --exists --print-errors gstreamer-1.0 gstreamer-video-1.0 gstreamer-app-1.0
+          if ($LASTEXITCODE -ne 0) { throw "GStreamer pkg-config 모듈을 찾지 못함" }
+          Write-Host "gstreamer $(pkg-config --modversion gstreamer-1.0)"
+
+      - name: Configure
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --target VMS_v2
+
+      - name: Package
+        run: |
+          $dist = "dist/standalone-vms"
+          New-Item -ItemType Directory -Force $dist, "$dist/gstreamer-1.0" | Out-Null
+
+          Copy-Item build/VMS_v2.exe, build/qt6keychain*.dll $dist
+          # 실제 app_config.json(로컬 서버 주소)은 절대 넣지 않고, 빈 기본값인 example을 이름만 바꿔 넣는다
+          Copy-Item app_config.example.json "$dist/app_config.json"
+          # 테마 qss는 qrc가 아니라 exe 기준 styles/v2_theme.qss에서 읽는다(theme_loader.cpp).
+          # 개발 빌드에선 build/../styles로 찾아져서 티가 안 나지만 배포판엔 직접 넣어줘야 한다.
+          New-Item -ItemType Directory -Force "$dist/styles" | Out-Null
+          Copy-Item styles/v2_theme.qss "$dist/styles"
+
+          # windeployqt는 이름이 qt6*로 시작하는 qt6keychain.dll을 Qt 모듈로 보고 Qt 설치 bin에서
+          # 의존성을 찾다가 실패한다. 러너는 매번 새로 만들어지니 Qt bin에 같이 넣어두고 돌린다.
+          Copy-Item build/qt6keychain*.dll "$env:QT_ROOT_DIR\bin"
+          windeployqt --release --no-translations --compiler-runtime "$dist/VMS_v2.exe"
+          if ($LASTEXITCODE -ne 0) { throw "windeployqt 실패" }
+
+          # GStreamer 코어/의존 DLL
+          Copy-Item "$env:GST_ROOT\bin\*.dll" $dist
+
+          # stream_player.cpp 파이프라인에 필요한 플러그인만 선별
+          # rtspsrc / rtph264·265depay / h264·265parse / avdec_* / uridecodebin / videoconvert·videoscale·videorate / appsink
+          $plugins = @(
+            'coreelements', 'app', 'typefindfunctions', 'playback',
+            'rtsp', 'rtp', 'rtpmanager', 'udp', 'tcp',
+            'videoparsersbad', 'libav', 'videoconvertscale', 'videorate', 'isomp4'
+          )
+          foreach ($p in $plugins) {
+            $dll = "$env:GST_ROOT\lib\gstreamer-1.0\gst$p.dll"
+            if (-not (Test-Path $dll)) { throw "GStreamer 플러그인 없음: $dll" }
+            Copy-Item $dll "$dist/gstreamer-1.0"
+          }
+
+          $zip = "standalone-vms-${{ github.ref_name }}-win64.zip" -replace '/', '-'
+          Compress-Archive -Path $dist -DestinationPath $zip
+          Get-Item $zip | Select-Object Name, @{n='MB'; e={[math]::Round($_.Length / 1MB, 1)}}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: standalone-vms-win64
+          path: standalone-vms-*.zip
+
+      - name: GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: standalone-vms-*.zip
+          generate_release_notes: true
