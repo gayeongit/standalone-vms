@@ -57,7 +57,10 @@ jobs:
           $base = "https://gstreamer.freedesktop.org/data/pkg/windows/$env:GST_VERSION/msvc"
           foreach ($name in "gstreamer-1.0-msvc-x86_64-$env:GST_VERSION.msi",
                             "gstreamer-1.0-devel-msvc-x86_64-$env:GST_VERSION.msi") {
-            Invoke-WebRequest "$base/$name" -OutFile $name
+            # freedesktop 서버가 큰 파일(devel MSI) 전송 중 연결을 끊는 경우가 있어
+            # Invoke-WebRequest 대신 재시도·이어받기(-C -)가 되는 curl 사용
+            curl.exe -L --fail --silent --show-error --retry 5 --retry-delay 5 --retry-all-errors -C - -o $name "$base/$name"
+            if ($LASTEXITCODE -ne 0) { throw "$name 다운로드 실패 (curl exit $LASTEXITCODE)" }
             # ADDLOCAL=ALL: 기본 설치엔 gst-libav(avdec_h264/h265)가 빠질 수 있어 전체 설치
             $p = Start-Process msiexec -ArgumentList "/i `"$name`" /qn ADDLOCAL=ALL INSTALLDIR=C:\gstreamer\" -Wait -PassThru
             if ($p.ExitCode -ne 0) { throw "$name 설치 실패 (exit $($p.ExitCode))" }
