@@ -24,8 +24,10 @@ env:
   # 개발 PC와 같은 1.28.6 설치본에서 빌드·배포에 필요한 것만 추린 zip(~73MB)을
   # 이 레포의 ci-deps 릴리즈에 올려두고 그걸 받는다.
   # 구성: bin/(DLL·pkg-config.exe), include/, lib/*.lib, lib/pkgconfig/, lib/glib-2.0/include/,
-  #       lib/gstreamer-1.0/(앱이 쓰는 플러그인 13개)
+  #       lib/gstreamer-1.0/(앱이 쓰는 플러그인 14개)
+  # zip 내용을 바꾸면 GST_DEPS_REV를 올려서 예전 캐시를 안 쓰게 한다.
   GST_VERSION: 1.28.6
+  GST_DEPS_REV: 2
   GST_DEPS_ASSET: gstreamer-1.28.6-msvc-x86_64-ci.zip
 
 jobs:
@@ -55,7 +57,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: C:\gstreamer
-          key: gstreamer-msvc-x86_64-${{ env.GST_VERSION }}
+          key: gstreamer-msvc-x86_64-${{ env.GST_VERSION }}-r${{ env.GST_DEPS_REV }}
 
       # releases/download/... 주소가 504를 반복해서, API 경로로 받는 gh release download를 쓴다
       - name: Install GStreamer (ci-deps 릴리즈의 slim 패키지)
@@ -74,7 +76,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: C:\gstreamer
-          key: gstreamer-msvc-x86_64-${{ env.GST_VERSION }}
+          key: gstreamer-msvc-x86_64-${{ env.GST_VERSION }}-r${{ env.GST_DEPS_REV }}
 
       # 설치 루트를 하드코딩하지 않고 pkg-config.exe 위치로 찾는다
       - name: Set GStreamer env
@@ -124,11 +126,11 @@ jobs:
           Copy-Item "$env:GST_ROOT\bin\*.dll" $dist
 
           # stream_player.cpp 파이프라인에 필요한 플러그인만 선별
-          # rtspsrc / rtph264·265depay / h264·265parse / avdec_* / uridecodebin / videoconvert / appsink
+          # rtspsrc / rtph264·265depay / h264·265parse / avdec_* / uridecodebin / videoconvert·videoscale·videorate / appsink
           $plugins = @(
             'coreelements', 'app', 'typefindfunctions', 'playback',
             'rtsp', 'rtp', 'rtpmanager', 'udp', 'tcp',
-            'videoparsersbad', 'libav', 'videoconvertscale', 'isomp4'
+            'videoparsersbad', 'libav', 'videoconvertscale', 'videorate', 'isomp4'
           )
           foreach ($p in $plugins) {
             $dll = "$env:GST_ROOT\lib\gstreamer-1.0\gst$p.dll"
