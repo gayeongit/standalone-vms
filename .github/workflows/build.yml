@@ -1,0 +1,134 @@
+# Windows 빌드 검증(CI) + 태그 push 시 배포 패키지 생성·GitHub Release 업로드(CD)
+#
+# - main push / PR: Qt 6.8 + MSVC + GStreamer로 빌드되는지 확인하고, 배포용 zip을 Actions 아티팩트로 남긴다.
+# - v* 태그 push: 같은 zip을 GitHub Release에 올린다.
+#
+# 배포 zip 구조는 main.cpp가 기대하는 형태를 따른다 — exe 옆에 Qt/GStreamer DLL,
+# 그리고 exe 옆 gstreamer-1.0/ 폴더에 필요한 플러그인만 넣는다(GST_PLUGIN_PATH 자동 지정).
+
+name: build-and-release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write   # Release 업로드용
+
+env:
+  QT_VERSION: 6.8.3
+  # 1.26부터 Windows 설치 파일이 단일 .exe로 바뀌었는데 무인 설치 옵션이 문서화돼 있지 않아서,
+  # 무인 설치(msiexec /qn)가 확실한 마지막 MSI 버전을 쓴다. 앱이 쓰는 플러그인은 1.24에도 모두 있다.
+  GST_VERSION: 1.24.13
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      # cl.exe / VS 번들 CMake·Ninja를 PATH에 올린다
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          arch: win64_msvc2022_64
+          modules: qtwebsockets
+          cache: true
+
+      - name: Cache GStreamer
+        id: gst-cache
+        uses: actions/cache@v4
+        with:
+          path: C:\gstreamer
+          key: gstreamer-msvc-x86_64-${{ env.GST_VERSION }}
+
+      - name: Install GStreamer (runtime + devel)
+        if: steps.gst-cache.outputs.cache-hit != 'true'
+        run: |
+          $base = "https://gstreamer.freedesktop.org/data/pkg/windows/$env:GST_VERSION/msvc"
+          foreach ($name in "gstreamer-1.0-msvc-x86_64-$env:GST_VERSION.msi",
+                            "gstreamer-1.0-devel-msvc-x86_64-$env:GST_VERSION.msi") {
+            Invoke-WebRequest "$base/$name" -OutFile $name
+            # ADDLOCAL=ALL: 기본 설치엔 gst-libav(avdec_h264/h265)가 빠질 수 있어 전체 설치
+            $p = Start-Process msiexec -ArgumentList "/i `"$name`" /qn ADDLOCAL=ALL INSTALLDIR=C:\gstreamer\" -Wait -PassThru
+            if ($p.ExitCode -ne 0) { throw "$name 설치 실패 (exit $($p.ExitCode))" }
+          }
+
+      # 설치 루트를 하드코딩하지 않고 pkg-config.exe 위치로 찾는다
+      - name: Set GStreamer env
+        run: |
+          $pc = Get-ChildItem C:\gstreamer -Recurse -Filter pkg-config.exe | Select-Object -First 1
+          if (-not $pc) { throw "pkg-config.exe를 찾지 못함 — GStreamer devel 설치 확인 필요" }
+          $root = Split-Path $pc.DirectoryName -Parent
+          "GST_ROOT=$root" >> $env:GITHUB_ENV
+          "PKG_CONFIG_PATH=$root\lib\pkgconfig" >> $env:GITHUB_ENV
+          "$root\bin" >> $env:GITHUB_PATH
+          Write-Host "GST_ROOT=$root"
+
+      # CMakeLists.txt는 GStreamer를 QUIET로 찾기 때문에, 못 찾아도 영상 재생이 빠진 exe가
+      # "빌드 성공"으로 나온다. CI에서는 여기서 막는다.
+      - name: Verify GStreamer
+        run: |
+          pkg-config --exists --print-errors gstreamer-1.0 gstreamer-video-1.0 gstreamer-app-1.0
+          if ($LASTEXITCODE -ne 0) { throw "GStreamer pkg-config 모듈을 찾지 못함" }
+          Write-Host "gstreamer $(pkg-config --modversion gstreamer-1.0)"
+
+      - name: Configure
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --target VMS_v2
+
+      - name: Package
+        run: |
+          $dist = "dist/standalone-vms"
+          New-Item -ItemType Directory -Force $dist, "$dist/gstreamer-1.0" | Out-Null
+
+          Copy-Item build/VMS_v2.exe, build/qt6keychain*.dll $dist
+          # 실제 app_config.json(로컬 서버 주소)은 절대 넣지 않고, 빈 기본값인 example을 이름만 바꿔 넣는다
+          Copy-Item app_config.example.json "$dist/app_config.json"
+
+          windeployqt --release --no-translations --compiler-runtime "$dist/VMS_v2.exe"
+          if ($LASTEXITCODE -ne 0) { throw "windeployqt 실패" }
+
+          # GStreamer 코어/의존 DLL
+          Copy-Item "$env:GST_ROOT\bin\*.dll" $dist
+
+          # stream_player.cpp 파이프라인에 필요한 플러그인만 선별
+          # rtspsrc / rtph264·265depay / h264·265parse / avdec_* / uridecodebin / videoconvert / appsink
+          $plugins = @(
+            'coreelements', 'app', 'typefindfunctions', 'playback',
+            'rtsp', 'rtp', 'rtpmanager', 'udp', 'tcp',
+            'videoparsersbad', 'libav', 'videoconvertscale', 'isomp4'
+          )
+          foreach ($p in $plugins) {
+            $dll = "$env:GST_ROOT\lib\gstreamer-1.0\gst$p.dll"
+            if (-not (Test-Path $dll)) { throw "GStreamer 플러그인 없음: $dll" }
+            Copy-Item $dll "$dist/gstreamer-1.0"
+          }
+
+          $zip = "standalone-vms-${{ github.ref_name }}-win64.zip" -replace '/', '-'
+          Compress-Archive -Path $dist -DestinationPath $zip
+          Get-Item $zip | Select-Object Name, @{n='MB'; e={[math]::Round($_.Length / 1MB, 1)}}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: standalone-vms-win64
+          path: standalone-vms-*.zip
+
+      - name: GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: standalone-vms-*.zip
+          generate_release_notes: true
