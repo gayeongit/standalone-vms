@@ -26,7 +26,7 @@ env:
   # 구성: bin/(DLL·pkg-config.exe), include/, lib/*.lib, lib/pkgconfig/, lib/glib-2.0/include/,
   #       lib/gstreamer-1.0/(앱이 쓰는 플러그인 13개)
   GST_VERSION: 1.28.6
-  GST_DEPS_URL: https://github.com/${{ github.repository }}/releases/download/ci-deps/gstreamer-1.28.6-msvc-x86_64-ci.zip
+  GST_DEPS_ASSET: gstreamer-1.28.6-msvc-x86_64-ci.zip
 
 jobs:
   build:
@@ -48,21 +48,33 @@ jobs:
           modules: qtwebsockets
           cache: true
 
-      - name: Cache GStreamer
+      # actions/cache는 job이 성공해야만 저장해서, 뒤 단계가 실패하면 매번 다시 받게 된다.
+      # restore/save를 나눠서 설치 직후 바로 캐시에 저장한다.
+      - name: Restore GStreamer cache
         id: gst-cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: C:\gstreamer
           key: gstreamer-msvc-x86_64-${{ env.GST_VERSION }}
 
+      # releases/download/... 주소가 504를 반복해서, API 경로로 받는 gh release download를 쓴다
       - name: Install GStreamer (ci-deps 릴리즈의 slim 패키지)
         if: steps.gst-cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          curl.exe -L --fail --silent --show-error --retry 5 --retry-delay 5 --retry-all-errors -o gst.zip $env:GST_DEPS_URL
-          if ($LASTEXITCODE -ne 0) { throw "GStreamer 패키지 다운로드 실패 (curl exit $LASTEXITCODE)" }
+          gh release download ci-deps --repo ${{ github.repository }} --pattern $env:GST_DEPS_ASSET --output gst.zip
+          if ($LASTEXITCODE -ne 0) { throw "GStreamer 패키지 다운로드 실패" }
           New-Item -ItemType Directory -Force C:\gstreamer | Out-Null
           tar.exe -xf gst.zip -C C:\gstreamer
           if ($LASTEXITCODE -ne 0) { throw "GStreamer 패키지 압축 해제 실패" }
+
+      - name: Save GStreamer cache
+        if: steps.gst-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: C:\gstreamer
+          key: gstreamer-msvc-x86_64-${{ env.GST_VERSION }}
 
       # 설치 루트를 하드코딩하지 않고 pkg-config.exe 위치로 찾는다
       - name: Set GStreamer env
