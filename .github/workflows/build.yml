@@ -109,6 +109,10 @@ jobs:
           Copy-Item build/VMS_v2.exe, build/qt6keychain*.dll $dist
           # 실제 app_config.json(로컬 서버 주소)은 절대 넣지 않고, 빈 기본값인 example을 이름만 바꿔 넣는다
           Copy-Item app_config.example.json "$dist/app_config.json"
+          # 테마 qss는 qrc가 아니라 exe 기준 styles/v2_theme.qss에서 읽는다(theme_loader.cpp).
+          # 개발 빌드에선 build/../styles로 찾아져서 티가 안 나지만 배포판엔 직접 넣어줘야 한다.
+          New-Item -ItemType Directory -Force "$dist/styles" | Out-Null
+          Copy-Item styles/v2_theme.qss "$dist/styles"
 
           # windeployqt는 이름이 qt6*로 시작하는 qt6keychain.dll을 Qt 모듈로 보고 Qt 설치 bin에서
           # 의존성을 찾다가 실패한다. 러너는 매번 새로 만들어지니 Qt bin에 같이 넣어두고 돌린다.
