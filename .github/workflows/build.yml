@@ -98,6 +98,9 @@ jobs:
           # 실제 app_config.json(로컬 서버 주소)은 절대 넣지 않고, 빈 기본값인 example을 이름만 바꿔 넣는다
           Copy-Item app_config.example.json "$dist/app_config.json"
 
+          # windeployqt는 이름이 qt6*로 시작하는 qt6keychain.dll을 Qt 모듈로 보고 Qt 설치 bin에서
+          # 의존성을 찾다가 실패한다. 러너는 매번 새로 만들어지니 Qt bin에 같이 넣어두고 돌린다.
+          Copy-Item build/qt6keychain*.dll "$env:QT_ROOT_DIR\bin"
           windeployqt --release --no-translations --compiler-runtime "$dist/VMS_v2.exe"
           if ($LASTEXITCODE -ne 0) { throw "windeployqt 실패" }
 
